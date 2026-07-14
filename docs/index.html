@@ -855,6 +855,7 @@
         }).join("");
     openSheet(
       '<h2>انتخاب جنس</h2>' +
+      '<button class="addline" id="pickNew">＋ جنس نو (که در اجناس نیست)</button>' +
       '<div class="pick">' + list + '</div>' +
       '<div class="actions"><button class="primary" id="pickBack">بازگشت به فاکتور</button></div>'
     );
@@ -865,7 +866,57 @@
         renderPurchaseForm();
       });
     });
+    $("#pickNew").addEventListener("click", openNewProductLine);
     $("#pickBack").addEventListener("click", renderPurchaseForm);
+  }
+
+  // فورم «جنس نو» داخل فاکتور خرید — با ثبت فاکتور خودکار در اجناس ثبت می‌شود.
+  function openNewProductLine() {
+    var type = "unit", unit = "piece";
+    openSheet(
+      '<h2>جنس نو</h2>' +
+      '<div class="field"><label>نام جنس</label>' +
+        '<input id="npName" type="text" placeholder="نام جنس" />' +
+        '<div class="err" id="eNpName">نام جنس را بنویسید</div></div>' +
+      '<div class="field"><label>نوع جنس</label>' +
+        '<div class="seg" id="npType">' +
+          '<button type="button" data-t="weighted">⚖️ وزنی</button>' +
+          '<button type="button" data-t="unit" class="on">🧃 دانه‌ای</button>' +
+        '</div></div>' +
+      '<div class="field"><label>واحد</label>' +
+        '<div class="seg" id="npUnit">' +
+          '<button type="button" data-u="kg">کیلو</button>' +
+          '<button type="button" data-u="piece" class="on">دانه</button>' +
+        '</div></div>' +
+      '<div class="field"><label>قیمت فروش (افغانی)</label>' +
+        '<input id="npSell" type="number" inputmode="decimal" step="any" min="0" placeholder="0" /></div>' +
+      '<p style="color:var(--ink-soft);font-size:13px;margin:-4px 0 12px">قیمت خرید و تعداد را در خود فاکتور می‌نویسید.</p>' +
+      '<div class="actions"><button class="ghost" id="npBack">بازگشت</button>' +
+        '<button class="primary" id="npAdd">＋ افزودن به فاکتور</button></div>'
+    );
+    sheet.querySelectorAll("#npType button").forEach(function (b) {
+      b.addEventListener("click", function () {
+        type = b.dataset.t; unit = type === "weighted" ? "kg" : "piece";
+        sheet.querySelectorAll("#npType button").forEach(function (x) { x.classList.toggle("on", x === b); });
+        sheet.querySelectorAll("#npUnit button").forEach(function (x) { x.classList.toggle("on", x.dataset.u === unit); });
+      });
+    });
+    sheet.querySelectorAll("#npUnit button").forEach(function (b) {
+      b.addEventListener("click", function () {
+        unit = b.dataset.u;
+        sheet.querySelectorAll("#npUnit button").forEach(function (x) { x.classList.toggle("on", x === b); });
+      });
+    });
+    $("#npBack").addEventListener("click", openLinePicker);
+    $("#npAdd").addEventListener("click", function () {
+      var nm = $("#npName").value.trim();
+      $("#eNpName").classList.toggle("show", !nm);
+      if (!nm) return;
+      var sell = parseFloat($("#npSell").value) || 0;
+      draft.lines.push({ productId: id(), name: nm, unit: unit, type: type, sellPrice: sell, qty: 1, buyPrice: 0, isNew: true });
+      renderPurchaseForm();
+    });
+    setTimeout(function () { $("#npName").focus(); }, 60);
   }
 
   function savePurchase() {
@@ -887,6 +938,10 @@
     else if (draft.phone && !sup.phone) sup.phone = draft.phone;
 
     validLines.forEach(function (l) {
+      // جنس نو: اول در اجناس ثبت شود (تعداد ۰، بعد از حلقه پایین زیاد می‌شود)
+      if (l.isNew && !findP(l.productId)) {
+        products.push({ id: l.productId, name: l.name, type: l.type || "unit", unit: l.unit, buy: l.buyPrice, sell: l.sellPrice || 0, qty: 0, expiry: "" });
+      }
       var p = findP(l.productId);
       if (p) { p.qty = +(p.qty + l.qty).toFixed(3); p.buy = l.buyPrice; }
     });

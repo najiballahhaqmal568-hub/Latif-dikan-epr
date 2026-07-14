@@ -1186,7 +1186,13 @@
     var el = $("#moreArea");
     if (moreView === "waste") { renderWaste(el); return; }
     if (moreView === "expenses") { renderExpenses(el); return; }
+    if (moreView === "reports") { renderReports(el); return; }
     el.innerHTML =
+      '<div class="menu-item" data-more="reports">' +
+        '<div class="mico" style="background:var(--primary-soft);color:var(--primary)">📊</div>' +
+        '<div class="mtx"><b>گزارش‌ها و فایده هر جنس</b><small>فروش، فایده، ضایعات، مصارف و قرض‌ها</small></div>' +
+        '<div class="chev">‹</div>' +
+      '</div>' +
       '<div class="menu-item" data-more="waste">' +
         '<div class="mico">🗑</div>' +
         '<div class="mtx"><b>ضایعات و تاریخ خرابی</b><small>ثبت اجناس خراب/تاریخ‌تیر و اخطار خرابی</small></div>' +
@@ -1197,6 +1203,83 @@
         '<div class="mtx"><b>مصارف خانه</b><small>پیسه‌ای که از دوکان برای خرچ خانه کشیده می‌شود</small></div>' +
         '<div class="chev">‹</div>' +
       '</div>';
+  }
+
+  // ---------- Reports (گزارش‌ها) ----------
+  var reportPeriod = "today"; // today | month | all
+  function periodStart(period) {
+    var d = new Date(); d.setHours(0, 0, 0, 0);
+    if (period === "today") return d;
+    if (period === "month") return new Date(d.getFullYear(), d.getMonth(), 1);
+    return new Date(0);
+  }
+
+  function computeReport(period) {
+    var start = periodStart(period);
+    var r = { totalSales: 0, cash: 0, credit: 0, cogs: 0, wasteLoss: 0, expenses: 0, profit: 0, perProduct: {} };
+    sales.forEach(function (s) {
+      if (new Date(s.date) < start) return;
+      r.totalSales += s.total;
+      if (s.paymentType === "cash") r.cash += s.total; else r.credit += s.total;
+      (s.items || []).forEach(function (it) {
+        var p = findP(it.productId);
+        var buy = p ? (p.buy || 0) : 0;
+        var cost = it.quantity * buy;
+        var prof = it.quantity * (it.sellPrice - buy);
+        r.cogs += cost;
+        var pp = r.perProduct[it.productId] || (r.perProduct[it.productId] = { name: it.productName, qty: 0, sales: 0, profit: 0 });
+        pp.qty += it.quantity; pp.sales += it.quantity * it.sellPrice; pp.profit += prof;
+      });
+    });
+    waste.forEach(function (w) { if (new Date(w.date) >= start) r.wasteLoss += w.quantity * w.buyPrice; });
+    expenses.forEach(function (x) { if (new Date(x.date) >= start) r.expenses += x.amount; });
+    r.profit = r.totalSales - r.cogs - r.wasteLoss;
+    return r;
+  }
+
+  function custDebtTotal() { var s = 0; customers.forEach(function (c) { s += c.debt; }); return s; }
+  function supDebtTotal() { var s = 0; suppliers.forEach(function (x) { s += x.debt; }); return s; }
+
+  function renderReports(el) {
+    var r = computeReport(reportPeriod);
+    function seg(v, label) {
+      return '<button type="button" data-rp="' + v + '" class="' + (reportPeriod === v ? "on" : "") + '">' + label + '</button>';
+    }
+    function row(label, val, cls) {
+      return '<div class="sumrow"><span>' + label + '</span><span class="num ' + (cls || "") + '">' + money(val) + '</span></div>';
+    }
+    var prods = Object.keys(r.perProduct).map(function (k) { return r.perProduct[k]; })
+      .sort(function (a, b) { return b.profit - a.profit; });
+    var prodHtml = prods.length === 0
+      ? '<p style="color:var(--ink-soft);text-align:center;padding:10px;font-size:14px">در این دوره فروشی نبوده</p>'
+      : prods.map(function (p) {
+          var col = p.profit >= 0 ? "var(--primary)" : "var(--danger)";
+          return '<div class="iline"><div class="in"><b>' + esc(p.name) + '</b><small class="num">فروش: ' + money(p.sales) + ' • تعداد: ' + formatQuantity(p.qty) + '</small></div>' +
+            '<div class="lt num" style="color:' + col + '">' + money(p.profit) + '</div></div>';
+        }).join("");
+
+    el.innerHTML =
+      '<div class="subhead"><button class="back moreBack" aria-label="بازگشت">→</button><h3>گزارش‌ها</h3></div>' +
+      '<div class="seg" id="rpToggle" style="margin:10px 14px 4px">' + seg("today", "امروز") + seg("month", "این ماه") + seg("all", "همه") + '</div>' +
+      '<div style="padding:0 14px">' +
+        '<div class="sumbox">' +
+          row("مجموع فروش", r.totalSales) +
+          row("فروش نقد", r.cash) +
+          row("فروش قرض", r.credit) +
+        '</div>' +
+        '<div class="sumbox">' +
+          row("قیمت تمام‌شد اجناس فروخته‌شده", r.cogs) +
+          row("ضرر ضایعات", r.wasteLoss) +
+          '<div class="sumrow total"><span>فایدهٔ دوکان</span><span class="num" style="color:' + (r.profit >= 0 ? "var(--primary)" : "var(--danger)") + '">' + money(r.profit) + '</span></div>' +
+        '</div>' +
+        '<div class="sumbox">' +
+          row("مصارف خانه (جدا)", r.expenses) +
+          '<div class="sumrow"><span>قرض مشتری‌ها (فعلی)</span><span class="rem num">' + money(custDebtTotal()) + '</span></div>' +
+          '<div class="sumrow"><span>قرض تامین‌کننده (فعلی)</span><span class="rem num">' + money(supDebtTotal()) + '</span></div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="listhead">فایده هر جنس (' + (reportPeriod === "today" ? "امروز" : reportPeriod === "month" ? "این ماه" : "همه") + ')</div>' +
+      prodHtml;
   }
 
   // ---------- Expenses (مصارف خانه) ----------
@@ -1422,7 +1505,8 @@
     if (e.target.closest("#newWasteBtn")) { openWastePicker(); return; }
     var w = e.target.closest("[data-wexp]"); if (w) { var p = findP(w.dataset.wexp); if (p) openWasteForm(p, "expired"); return; }
     if (e.target.closest("#newExpenseBtn")) { openExpenseForm(); return; }
-    var cor = e.target.closest("[data-correct]"); if (cor) { var ex = null; for (var i = 0; i < expenses.length; i++) if (expenses[i].id === cor.dataset.correct) ex = expenses[i]; if (ex) openCorrectionForm(ex); }
+    var cor = e.target.closest("[data-correct]"); if (cor) { var ex = null; for (var i = 0; i < expenses.length; i++) if (expenses[i].id === cor.dataset.correct) ex = expenses[i]; if (ex) openCorrectionForm(ex); return; }
+    var rp = e.target.closest("[data-rp]"); if (rp) { reportPeriod = rp.dataset.rp; renderMore(); }
   });
 
   $("#search").addEventListener("input", function () {

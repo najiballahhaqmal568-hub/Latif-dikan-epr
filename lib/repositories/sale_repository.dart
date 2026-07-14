@@ -28,12 +28,39 @@ class SaleRepository {
       total += item.lineTotal;
     }
 
+    final name = (customerName ?? '').trim();
+
     return db.transaction<int>((txn) async {
+      // فروش قرضی با نام: مشتری یافته/ساخته شود و قرض او زیاد گردد
+      int? customerId;
+      if (paymentType == PaymentType.credit && name.isNotEmpty) {
+        final existing = await txn.query(
+          'customers',
+          where: 'name = ? COLLATE NOCASE',
+          whereArgs: [name],
+          limit: 1,
+        );
+        if (existing.isNotEmpty) {
+          customerId = existing.first['id'] as int;
+          await txn.rawUpdate(
+            'UPDATE customers SET debt = debt + ? WHERE id = ?',
+            [total, customerId],
+          );
+        } else {
+          customerId = await txn.insert('customers', {
+            'name': name,
+            'phone': null,
+            'debt': total,
+          });
+        }
+      }
+
       final saleId = await txn.insert('sales', {
         'date': now,
         'total': total,
         'payment_type': paymentType.dbValue,
-        'customer_name': customerName,
+        'customer_name': name.isEmpty ? null : name,
+        'customer_id': customerId,
       });
 
       for (final item in cartItems) {
@@ -54,5 +81,17 @@ class SaleRepository {
 
       return saleId;
     });
+  }
+
+  /// فروش‌های قرضی یک مشتری (برای صفحه قرض مشتری).
+  Future<List<Sale>> getCreditSalesForCustomer(int customerId) async {
+    final db = await _helper.database;
+    final rows = await db.query(
+      'sales',
+      where: "customer_id = ? AND payment_type = 'credit'",
+      whereArgs: [customerId],
+      orderBy: 'date DESC, id DESC',
+    );
+    return rows.map(Sale.fromMap).toList();
   }
 }

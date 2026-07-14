@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
+import 'debts/debts_screen.dart';
 import 'products/product_list_screen.dart';
 import 'purchases/purchases_screen.dart';
 import 'sales/sales_screen.dart';
-import 'suppliers/suppliers_screen.dart';
 
 /// صفحه اصلی با نویگیشن پایین: فروش، اجناس، خرید، تامین‌کننده.
 class HomeScreen extends StatefulWidget {
@@ -26,7 +26,7 @@ class _HomeScreenState extends State<HomeScreen> {
       case 2:
         return const PurchasesScreen();
       default:
-        return const SuppliersScreen();
+        return const DebtsScreen();
     }
   }
 
@@ -58,9 +58,9 @@ class _HomeScreenState extends State<HomeScreen> {
             label: 'خرید',
           ),
           NavigationDestination(
-            icon: Icon(Icons.handshake_outlined),
-            selectedIcon: Icon(Icons.handshake, color: AppTheme.primary),
-            label: 'تامین‌کننده',
+            icon: Icon(Icons.menu_book_outlined),
+            selectedIcon: Icon(Icons.menu_book, color: AppTheme.primary),
+            label: 'قرض‌ها',
           ),
         ],
       ),

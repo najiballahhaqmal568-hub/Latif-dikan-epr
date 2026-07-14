@@ -23,11 +23,6 @@ class ExpenseRepository {
     });
   }
 
-  Future<int> delete(int id) async {
-    final db = await _helper.database;
-    return db.delete('expenses', where: 'id = ?', whereArgs: [id]);
-  }
-
   Future<double> total() async {
     final db = await _helper.database;
     final rows =

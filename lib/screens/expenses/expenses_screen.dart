@@ -53,11 +53,6 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     _load();
   }
 
-  Future<void> _delete(Expense e) async {
-    await _repo.delete(e.id!);
-    _load();
-  }
-
   String _shortDate(String iso) {
     final d = DateTime.tryParse(iso);
     if (d == null) return iso;
@@ -130,21 +125,11 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                                         fontWeight: FontWeight.bold)),
                                 subtitle: Text(_shortDate(e.date),
                                     style: const TextStyle(fontSize: 13)),
-                                trailing: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(formatAfghani(e.amount),
-                                        style: const TextStyle(
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.bold,
-                                            color: AppTheme.credit)),
-                                    IconButton(
-                                      icon: const Icon(Icons.delete_outline,
-                                          color: AppTheme.danger),
-                                      onPressed: () => _delete(e),
-                                    ),
-                                  ],
-                                ),
+                                trailing: Text(formatAfghani(e.amount),
+                                    style: const TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                        color: AppTheme.credit)),
                               ),
                             );
                           },

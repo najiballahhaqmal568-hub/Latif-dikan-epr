@@ -1207,7 +1207,7 @@
     var listHtml = sorted.length === 0
       ? '<p style="color:var(--ink-soft);text-align:center;padding:10px;font-size:14px">هنوز مصرفی ثبت نشده</p>'
       : sorted.map(function (x) {
-          return '<div class="iline"><button class="x" data-delexp="' + x.id + '" aria-label="حذف">×</button>' +
+          return '<div class="iline">' +
             '<div class="in"><b>' + esc(x.note || "مصرف") + '</b><small class="num">' + fmtDate(x.date) + '</small></div>' +
             '<div class="lt num" style="color:var(--credit)">' + money(x.amount) + '</div></div>';
         }).join("");
@@ -1243,11 +1243,6 @@
     setTimeout(function () { $("#expAmt").focus(); }, 60);
   }
 
-  function deleteExpense(eid) {
-    expenses = expenses.filter(function (x) { return x.id !== eid; });
-    save(LS_EXP, expenses); renderMore();
-    toast("مصرف حذف شد");
-  }
 
   function expiringProducts() {
     return products.filter(function (p) {
@@ -1386,7 +1381,6 @@
     if (e.target.closest("#newWasteBtn")) { openWastePicker(); return; }
     var w = e.target.closest("[data-wexp]"); if (w) { var p = findP(w.dataset.wexp); if (p) openWasteForm(p, "expired"); return; }
     if (e.target.closest("#newExpenseBtn")) { openExpenseForm(); return; }
-    var de = e.target.closest("[data-delexp]"); if (de) { deleteExpense(de.dataset.delexp); }
   });
 
   $("#search").addEventListener("input", function () {

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../models/customer.dart';
+import '../../models/payment.dart';
 import '../../models/purchase.dart';
 import '../../models/sale.dart';
 import '../../models/supplier.dart';
@@ -83,6 +84,7 @@ class _CustomersViewState extends State<_CustomersView> {
 
   Future<void> _openDetail(Customer c) async {
     final sales = await _saleRepo.getCreditSalesForCustomer(c.id!);
+    final receipts = await _repo.getPayments(c.id!);
     if (!mounted) return;
     await showModalBottomSheet(
       context: context,
@@ -91,6 +93,7 @@ class _CustomersViewState extends State<_CustomersView> {
       builder: (_) => _CustomerDetailSheet(
         customer: c,
         sales: sales,
+        receipts: receipts,
         onPay: (amount) => _repo.pay(c.id!, amount),
       ),
     );
@@ -137,11 +140,13 @@ class _CustomersViewState extends State<_CustomersView> {
 class _CustomerDetailSheet extends StatefulWidget {
   final Customer customer;
   final List<Sale> sales;
+  final List<Payment> receipts;
   final Future<void> Function(double amount) onPay;
 
   const _CustomerDetailSheet({
     required this.customer,
     required this.sales,
+    required this.receipts,
     required this.onPay,
   });
 
@@ -151,11 +156,13 @@ class _CustomerDetailSheet extends StatefulWidget {
 
 class _CustomerDetailSheetState extends State<_CustomerDetailSheet> {
   late double _debt;
+  late List<Payment> _receipts;
 
   @override
   void initState() {
     super.initState();
     _debt = widget.customer.debt;
+    _receipts = List.of(widget.receipts);
   }
 
   Future<void> _pay() async {
@@ -169,10 +176,18 @@ class _CustomerDetailSheetState extends State<_CustomerDetailSheet> {
     );
     if (amount != null && amount > 0) {
       await widget.onPay(amount);
-      setState(() => _debt = (_debt - amount) > 0 ? _debt - amount : 0);
+      setState(() {
+        _debt = (_debt - amount) > 0 ? _debt - amount : 0;
+        _receipts.insert(
+            0,
+            Payment(
+                refId: widget.customer.id!,
+                date: DateTime.now().toIso8601String(),
+                amount: amount));
+      });
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('دریافت ثبت شد ✓')));
+            .showSnackBar(const SnackBar(content: Text('رسید دریافت ثبت شد ✓')));
       }
     }
   }
@@ -186,6 +201,16 @@ class _CustomerDetailSheetState extends State<_CustomerDetailSheet> {
       debt: _debt,
       payLabel: 'دریافت پرداخت از مشتری',
       onPay: _debt > 0 ? _pay : null,
+      receiptsTitle: 'رسیدهای دریافت',
+      receipts: _receipts
+          .map((r) => _HistoryRow(
+                title: _shortDate(r.date),
+                subtitle: 'رسید',
+                trailing: formatAfghani(r.amount),
+                trailingColor: AppTheme.primary,
+              ))
+          .toList(),
+      emptyReceipts: 'رسیدی ثبت نشده',
       historyTitle: 'فروش‌های قرضی',
       history: widget.sales
           .map((s) => _HistoryRow(
@@ -224,6 +249,7 @@ class _SuppliersViewState extends State<_SuppliersView> {
 
   Future<void> _openDetail(Supplier s) async {
     final purchases = await _purchaseRepo.getForSupplier(s.id!);
+    final receipts = await _repo.getPayments(s.id!);
     if (!mounted) return;
     await showModalBottomSheet(
       context: context,
@@ -232,6 +258,7 @@ class _SuppliersViewState extends State<_SuppliersView> {
       builder: (_) => _SupplierDetailSheet(
         supplier: s,
         purchases: purchases,
+        receipts: receipts,
         onPay: (amount) => _repo.pay(s.id!, amount),
       ),
     );
@@ -278,11 +305,13 @@ class _SuppliersViewState extends State<_SuppliersView> {
 class _SupplierDetailSheet extends StatefulWidget {
   final Supplier supplier;
   final List<Purchase> purchases;
+  final List<Payment> receipts;
   final Future<void> Function(double amount) onPay;
 
   const _SupplierDetailSheet({
     required this.supplier,
     required this.purchases,
+    required this.receipts,
     required this.onPay,
   });
 
@@ -292,11 +321,13 @@ class _SupplierDetailSheet extends StatefulWidget {
 
 class _SupplierDetailSheetState extends State<_SupplierDetailSheet> {
   late double _debt;
+  late List<Payment> _receipts;
 
   @override
   void initState() {
     super.initState();
     _debt = widget.supplier.debt;
+    _receipts = List.of(widget.receipts);
   }
 
   Future<void> _pay() async {
@@ -310,10 +341,18 @@ class _SupplierDetailSheetState extends State<_SupplierDetailSheet> {
     );
     if (amount != null && amount > 0) {
       await widget.onPay(amount);
-      setState(() => _debt = (_debt - amount) > 0 ? _debt - amount : 0);
+      setState(() {
+        _debt = (_debt - amount) > 0 ? _debt - amount : 0;
+        _receipts.insert(
+            0,
+            Payment(
+                refId: widget.supplier.id!,
+                date: DateTime.now().toIso8601String(),
+                amount: amount));
+      });
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('پرداخت ثبت شد ✓')));
+            .showSnackBar(const SnackBar(content: Text('رسید پرداخت ثبت شد ✓')));
       }
     }
   }
@@ -327,6 +366,16 @@ class _SupplierDetailSheetState extends State<_SupplierDetailSheet> {
       debt: _debt,
       payLabel: 'پرداخت به تامین‌کننده',
       onPay: _debt > 0 ? _pay : null,
+      receiptsTitle: 'رسیدهای پرداخت',
+      receipts: _receipts
+          .map((r) => _HistoryRow(
+                title: _shortDate(r.date),
+                subtitle: 'رسید',
+                trailing: formatAfghani(r.amount),
+                trailingColor: AppTheme.primary,
+              ))
+          .toList(),
+      emptyReceipts: 'رسیدی ثبت نشده',
       historyTitle: 'فاکتورها',
       history: widget.purchases
           .map((p) => _HistoryRow(
@@ -459,6 +508,9 @@ class _LedgerSheet extends StatelessWidget {
   final double debt;
   final String payLabel;
   final VoidCallback? onPay;
+  final String receiptsTitle;
+  final List<_HistoryRow> receipts;
+  final String emptyReceipts;
   final String historyTitle;
   final List<_HistoryRow> history;
   final String emptyHistory;
@@ -470,6 +522,9 @@ class _LedgerSheet extends StatelessWidget {
     required this.debt,
     required this.payLabel,
     required this.onPay,
+    required this.receiptsTitle,
+    required this.receipts,
+    required this.emptyReceipts,
     required this.historyTitle,
     required this.history,
     required this.emptyHistory,
@@ -524,50 +579,56 @@ class _LedgerSheet extends StatelessWidget {
                   minimumSize: const Size.fromHeight(56)),
             ),
           const SizedBox(height: 16),
-          Align(
-            alignment: Alignment.centerRight,
-            child: Text(historyTitle,
-                style: const TextStyle(
-                    fontSize: 16, fontWeight: FontWeight.bold)),
-          ),
-          const SizedBox(height: 6),
-          if (history.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Text(emptyHistory,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.grey)),
-            )
-          else
-            ...history.map((h) => Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(h.title,
-                                style: const TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.bold)),
-                            Text(h.subtitle,
-                                style: const TextStyle(
-                                    fontSize: 12, color: Colors.grey)),
-                          ],
-                        ),
-                      ),
-                      Text(h.trailing,
-                          style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.bold,
-                              color: h.trailingColor)),
-                    ],
-                  ),
-                )),
+          ..._section(receiptsTitle, receipts, emptyReceipts),
+          const SizedBox(height: 16),
+          ..._section(historyTitle, history, emptyHistory),
         ],
       ),
     );
+  }
+
+  List<Widget> _section(String title, List<_HistoryRow> rows, String empty) {
+    return [
+      Align(
+        alignment: Alignment.centerRight,
+        child: Text(title,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+      ),
+      const SizedBox(height: 6),
+      if (rows.isEmpty)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Text(empty,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.grey)),
+        )
+      else
+        ...rows.map((h) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(h.title,
+                            style: const TextStyle(
+                                fontSize: 15, fontWeight: FontWeight.bold)),
+                        Text(h.subtitle,
+                            style: const TextStyle(
+                                fontSize: 12, color: Colors.grey)),
+                      ],
+                    ),
+                  ),
+                  Text(h.trailing,
+                      style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                          color: h.trailingColor)),
+                ],
+              ),
+            )),
+    ];
   }
 }
 

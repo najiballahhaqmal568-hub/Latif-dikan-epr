@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../theme/app_theme.dart';
 import '../expenses/expenses_screen.dart';
+import '../reports/reports_screen.dart';
 import '../waste/waste_screen.dart';
 
 /// صفحه «بیشتر» — منوی بخش‌های کم‌کاربردتر (مقیاس‌پذیر برای بخش‌های آینده).
@@ -15,6 +16,14 @@ class MoreScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.symmetric(vertical: 8),
         children: [
+          _MenuItem(
+            icon: Icons.bar_chart,
+            title: 'گزارش‌ها و فایده هر جنس',
+            subtitle: 'فروش، فایده، ضایعات، مصارف و قرض‌ها',
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const ReportsScreen()),
+            ),
+          ),
           _MenuItem(
             icon: Icons.delete_outline,
             title: 'ضایعات و تاریخ خرابی',

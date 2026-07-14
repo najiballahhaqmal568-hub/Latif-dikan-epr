@@ -470,6 +470,7 @@
   var LS_SUP = "dukan.suppliers.v1", LS_PUR = "dukan.purchases.v1", LS_CUST = "dukan.customers.v1";
   var LS_SPAY = "dukan.supPayments.v1", LS_CPAY = "dukan.custPayments.v1", LS_WASTE = "dukan.waste.v1", LS_EXP = "dukan.expenses.v1";
   var EXPIRY_WARN_DAYS = 14;
+  var WIFI_LOW_GB = 20;
   function load(key, def) { try { return JSON.parse(localStorage.getItem(key)) || def; } catch (e) { return def; } }
   function save(key, val) { localStorage.setItem(key, JSON.stringify(val)); }
 
@@ -528,6 +529,9 @@
     return days + " روز تا خرابی";
   }
   function reasonLabel(r) { return r === "expired" ? "تاریخ‌تیر" : "خراب"; }
+  function typeLabel(t) { return t === "weighted" ? "وزنی" : (t === "wifi" ? "وای‌فای" : "دانه‌ای"); }
+  function typeIcon(t) { return t === "weighted" ? "⚖️" : (t === "wifi" ? "📶" : "🧃"); }
+  function typeCls(t) { return t === "unit" ? "u" : "w"; }
 
   var toastTimer;
   function toast(msg, warn) {
@@ -550,14 +554,14 @@
       return;
     }
     g.innerHTML = list.map(function (p) {
-      var cls = p.type === "weighted" ? "w" : "u";
-      var ico = p.type === "weighted" ? "⚖️" : "🧃";
+      var cls = typeCls(p.type);
+      var ico = typeIcon(p.type);
       var oos = p.qty <= 0 ? '<div class="oos">موجود نیست</div>' : '';
       return '<div class="tile ' + cls + '" data-id="' + p.id + '" role="button" tabindex="0">' +
         '<div class="ico">' + ico + '</div>' +
         '<div class="nm">' + esc(p.name) + '</div>' +
         '<div class="pr num">' + money(p.sell) + '</div>' +
-        '<div class="badge">' + (p.type === "weighted" ? "وزنی" : "دانه‌ای") + '</div>' +
+        '<div class="badge">' + typeLabel(p.type) + '</div>' +
         oos + '</div>';
     }).join("");
   }
@@ -565,7 +569,7 @@
   function onTileTap(pid) {
     var p = findP(pid); if (!p) return;
     if (p.qty <= 0) toast("اخطار: موجودی «" + p.name + "» صفر است", true);
-    if (p.type === "weighted") openQtyDialog(p);
+    if (p.type === "weighted" || p.type === "wifi") openQtyDialog(p);
     else { addToCart(p.id, 1); }
   }
 
@@ -636,8 +640,8 @@
     }
     var sorted = products.slice().sort(function (a, b) { return a.name.localeCompare(b.name, "fa"); });
     el.innerHTML = sorted.map(function (p) {
-      var cls = p.type === "weighted" ? "w" : "u";
-      var ico = p.type === "weighted" ? "⚖️" : "🧃";
+      var cls = typeCls(p.type);
+      var ico = typeIcon(p.type);
       var low = p.qty <= 0;
       var dte = daysToExpiry(p.expiry);
       var expWarn = (dte !== null && dte <= EXPIRY_WARN_DAYS)
@@ -645,7 +649,7 @@
       return '<div class="prow ' + cls + '">' +
         '<div class="tapzone" data-edit="' + p.id + '" role="button" tabindex="0">' +
           '<div class="ico">' + ico + '</div>' +
-          '<div class="info"><b>' + esc(p.name) + '</b><small>' + (p.type === "weighted" ? "وزنی" : "دانه‌ای") + ' • فروش: ' + money(p.sell) + '</small>' + (expWarn ? '<br>' + expWarn : '') + '</div>' +
+          '<div class="info"><b>' + esc(p.name) + '</b><small>' + typeLabel(p.type) + ' • فروش: ' + money(p.sell) + '</small>' + (expWarn ? '<br>' + expWarn : '') + '</div>' +
         '</div>' +
         '<div class="qty"><div class="q num ' + (low ? "low" : "") + '">' + qtyUnit(p.qty, p.unit) + '</div><small>' + (low ? "موجود نیست" : "موجود") + '</small></div>' +
         '<button class="del" data-del="' + p.id + '" aria-label="حذف">🗑</button>' +
@@ -662,15 +666,12 @@
   // Quantity dialog (weighted)
   function openQtyDialog(p) {
     var u = unitLabel(p.unit);
+    var presets = p.unit === "gb" ? [[1, "۱"], [2, "۲"], [5, "۵"], [10, "۱۰"]] : [[0.5, "نیم"], [1, "۱"], [2, "۲"], [5, "۵"]];
+    var presetHtml = presets.map(function (pr) { return '<button data-q="' + pr[0] + '">' + pr[1] + ' ' + u + '</button>'; }).join("");
     openSheet(
       '<h2>مقدار ' + esc(p.name) + '</h2>' +
       '<p style="margin:-6px 0 12px;color:var(--ink-soft);font-size:15px">قیمت فی ' + u + ': <b class="num">' + money(p.sell) + '</b></p>' +
-      '<div class="qbtns">' +
-        '<button data-q="0.5">نیم ' + u + '</button>' +
-        '<button data-q="1">۱ ' + u + '</button>' +
-        '<button data-q="2">۲ ' + u + '</button>' +
-        '<button data-q="5">۵ ' + u + '</button>' +
-      '</div>' +
+      '<div class="qbtns">' + presetHtml + '</div>' +
       '<div class="field"><label>یا مقدار دلخواه (' + u + ')</label>' +
         '<input id="qCustom" type="number" inputmode="decimal" step="any" min="0" placeholder="0" /></div>' +
       '<div class="actions"><button class="ghost" data-close>لغو</button>' +
@@ -714,20 +715,21 @@
         '<div class="seg" id="segType">' +
           '<button type="button" data-t="weighted" class="' + (p.type === "weighted" ? "on" : "") + '">⚖️ وزنی</button>' +
           '<button type="button" data-t="unit" class="' + (p.type === "unit" ? "on" : "") + '">🧃 دانه‌ای</button>' +
+          '<button type="button" data-t="wifi" class="' + (p.type === "wifi" ? "on" : "") + '">📶 وای‌فای</button>' +
         '</div></div>' +
-      '<div class="field"><label>واحد</label>' +
+      '<div class="field" id="unitField"><label>واحد</label>' +
         '<div class="seg" id="segUnit">' +
           '<button type="button" data-u="kg" class="' + (p.unit === "kg" ? "on" : "") + '">کیلو</button>' +
           '<button type="button" data-u="piece" class="' + (p.unit === "piece" ? "on" : "") + '">دانه</button>' +
         '</div></div>' +
-      '<div class="field"><label>قیمت خرید (افغانی)</label>' +
+      '<div class="field"><label id="lBuy">قیمت خرید (افغانی)</label>' +
         '<input id="fBuy" type="number" inputmode="decimal" step="any" min="0" value="' + p.buy + '" placeholder="0" /></div>' +
-      '<div class="field"><label>قیمت فروش (افغانی)</label>' +
+      '<div class="field"><label id="lSell">قیمت فروش (افغانی)</label>' +
         '<input id="fSell" type="number" inputmode="decimal" step="any" min="0" value="' + p.sell + '" placeholder="0" />' +
         '<div class="err" id="eSell">قیمت فروش را درست بنویسید</div></div>' +
       '<div class="field"><label id="lQty">تعداد موجود</label>' +
         '<input id="fQty" type="number" inputmode="decimal" step="any" min="0" value="' + p.qty + '" placeholder="0" /></div>' +
-      '<div class="field"><label>تاریخ خرابی (اختیاری)</label>' +
+      '<div class="field"><label id="lExp">تاریخ خرابی (اختیاری)</label>' +
         '<input id="fExp" type="date" value="' + (p.expiry || "") + '" /></div>' +
       '<div class="actions">' +
         (editing ? '<button class="ghost" id="fDelete" style="color:var(--danger);border-color:var(--danger)">حذف</button>' : '<button class="ghost" data-close>لغو</button>') +
@@ -736,16 +738,23 @@
     );
 
     var type = p.type, unit = p.unit;
-    function refreshQtyLabel() { $("#lQty").textContent = type === "weighted" ? "مقدار موجود (کیلو)" : "تعداد موجود (دانه)"; }
-    refreshQtyLabel();
+    function refreshLabels() {
+      var isWifi = type === "wifi";
+      $("#unitField").style.display = isWifi ? "none" : "block";
+      $("#lQty").textContent = isWifi ? "مقدار (جی‌بی)" : (type === "weighted" ? "مقدار موجود (کیلو)" : "تعداد موجود (دانه)");
+      $("#lBuy").textContent = isWifi ? "قیمت خرید فی جی‌بی (افغانی)" : "قیمت خرید (افغانی)";
+      $("#lSell").textContent = isWifi ? "قیمت فروش فی جی‌بی (افغانی)" : "قیمت فروش (افغانی)";
+      $("#lExp").textContent = isWifi ? "تاریخ ختم" : "تاریخ خرابی (اختیاری)";
+    }
+    refreshLabels();
     sheet.querySelectorAll("#segType button").forEach(function (b) {
       b.addEventListener("click", function () {
         type = b.dataset.t;
         sheet.querySelectorAll("#segType button").forEach(function (x) { x.classList.toggle("on", x === b); });
         // واحد پیش‌فرض از روی نوع
-        unit = type === "weighted" ? "kg" : "piece";
+        unit = type === "weighted" ? "kg" : (type === "wifi" ? "gb" : "piece");
         sheet.querySelectorAll("#segUnit button").forEach(function (x) { x.classList.toggle("on", x.dataset.u === unit); });
-        refreshQtyLabel();
+        refreshLabels();
       });
     });
     sheet.querySelectorAll("#segUnit button").forEach(function (b) {
@@ -1187,10 +1196,16 @@
     if (moreView === "waste") { renderWaste(el); return; }
     if (moreView === "expenses") { renderExpenses(el); return; }
     if (moreView === "reports") { renderReports(el); return; }
+    if (moreView === "wifi") { renderWifi(el); return; }
     el.innerHTML =
       '<div class="menu-item" data-more="reports">' +
         '<div class="mico" style="background:var(--primary-soft);color:var(--primary)">📊</div>' +
         '<div class="mtx"><b>گزارش‌ها و فایده هر جنس</b><small>فروش، فایده، ضایعات، مصارف و قرض‌ها</small></div>' +
+        '<div class="chev">‹</div>' +
+      '</div>' +
+      '<div class="menu-item" data-more="wifi">' +
+        '<div class="mico" style="background:var(--primary-soft);color:var(--primary)">📶</div>' +
+        '<div class="mtx"><b>وای‌فای</b><small>جی‌بی مانده، تاریخ ختم و اخطارها</small></div>' +
         '<div class="chev">‹</div>' +
       '</div>' +
       '<div class="menu-item" data-more="waste">' +
@@ -1282,6 +1297,40 @@
       '</div>' +
       '<div class="listhead">فایده هر جنس (' + (reportPeriod === "today" ? "امروز" : reportPeriod === "month" ? "این ماه" : "همه") + ')</div>' +
       prodHtml;
+  }
+
+  // ---------- WiFi (وای‌فای) ----------
+  function renderWifi(el) {
+    var head = '<div class="subhead"><button class="back moreBack" aria-label="بازگشت">→</button><h3>وای‌فای</h3></div>';
+    var list = products.filter(function (p) { return p.type === "wifi"; });
+    if (list.length === 0) {
+      el.innerHTML = head + '<div class="empty"><div class="big">📶</div><p>هنوز وای‌فایی ثبت نشده.<br>از بخش «اجناس» یک جنس نوع «وای‌فای» بسازید،<br>بعد از «خرید» جی‌بی بخرید.</p></div>';
+      return;
+    }
+    var rows = list.map(function (p) {
+      var dte = daysToExpiry(p.expiry);
+      var badges = [];
+      if (p.qty <= 0) badges.push(["خلاص شده", "danger"]);
+      else if (p.qty <= WIFI_LOW_GB) badges.push(["جی‌بی کم", "credit"]);
+      if (dte !== null) {
+        if (dte < 0) badges.push(["تاریخ تیر شده", "danger"]);
+        else if (dte <= EXPIRY_WARN_DAYS) badges.push([expiryLabel(dte), "credit"]);
+      }
+      var badgeHtml = badges.map(function (b) {
+        var st = b[1] === "danger" ? "background:var(--danger-soft);color:var(--danger)" : "background:var(--credit-soft);color:var(--credit)";
+        return '<span class="reason-badge" style="' + st + '">' + b[0] + '</span>';
+      }).join(" ");
+      var expiredRemaining = (dte !== null && dte < 0 && p.qty > 0);
+      return '<div class="pcard">' +
+        '<div class="r1"><b>📶 ' + esc(p.name) + '</b>' + (p.expiry ? '<span class="dt num">تا ' + fmtDate(p.expiry) + '</span>' : '') + '</div>' +
+        '<div class="r2"><span class="num">مانده: ' + qtyUnit(p.qty, p.unit) + '</span><span class="num">فروش: ' + money(p.sell) + ' فی جی‌بی</span></div>' +
+        (badgeHtml ? '<div style="margin-top:8px">' + badgeHtml + '</div>' : '') +
+        (expiredRemaining ? '<button class="wbtn" data-wifiwaste="' + p.id + '" style="margin-top:10px;width:100%;background:var(--danger)">انتقال باقی‌ماندهٔ (' + qtyUnit(p.qty, p.unit) + ') به ضایعات</button>' : '') +
+        '</div>';
+    }).join("");
+    el.innerHTML = head +
+      '<p style="color:var(--ink-soft);font-size:13px;padding:4px 16px 6px">وای‌فای دو شرط ختم دارد: خلاص‌شدن جی‌بی یا تیرشدن تاریخ. فروش جی‌بی از تب «فروش» انجام می‌شود.</p>' +
+      rows;
   }
 
   // ---------- Expenses (مصارف خانه) ----------
@@ -1508,7 +1557,8 @@
     var w = e.target.closest("[data-wexp]"); if (w) { var p = findP(w.dataset.wexp); if (p) openWasteForm(p, "expired"); return; }
     if (e.target.closest("#newExpenseBtn")) { openExpenseForm(); return; }
     var cor = e.target.closest("[data-correct]"); if (cor) { var ex = null; for (var i = 0; i < expenses.length; i++) if (expenses[i].id === cor.dataset.correct) ex = expenses[i]; if (ex) openCorrectionForm(ex); return; }
-    var rp = e.target.closest("[data-rp]"); if (rp) { reportPeriod = rp.dataset.rp; renderMore(); }
+    var rp = e.target.closest("[data-rp]"); if (rp) { reportPeriod = rp.dataset.rp; renderMore(); return; }
+    var ww = e.target.closest("[data-wifiwaste]"); if (ww) { var wp = findP(ww.dataset.wifiwaste); if (wp && wp.qty > 0) recordWaste(wp, wp.qty, "expired"); }
   });
 
   $("#search").addEventListener("input", function () {

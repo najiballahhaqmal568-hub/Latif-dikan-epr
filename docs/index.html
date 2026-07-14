@@ -1206,7 +1206,7 @@
   }
 
   // ---------- Reports (گزارش‌ها) ----------
-  var reportPeriod = "today"; // today | month | all
+  var reportPeriod = "all"; // today | month | all — پیش‌فرض «همه» تا داده فوری دیده شود
   function periodStart(period) {
     var d = new Date(); d.setHours(0, 0, 0, 0);
     if (period === "today") return d;
@@ -1262,6 +1262,7 @@
     el.innerHTML =
       '<div class="subhead"><button class="back moreBack" aria-label="بازگشت">→</button><h3>گزارش‌ها</h3></div>' +
       '<div class="seg" id="rpToggle" style="margin:10px 14px 4px">' + seg("today", "امروز") + seg("month", "این ماه") + seg("all", "همه") + '</div>' +
+      (r.totalSales === 0 ? '<div class="warn-card" style="background:var(--credit-soft);border-color:var(--credit)"><div class="wi">ℹ️</div><div class="wtx"><b>در این دوره فروشی ثبت نشده</b><small style="color:var(--credit)">دورهٔ «همه» را ببینید یا یک فروش تازه ثبت کنید</small></div></div>' : '') +
       '<div style="padding:0 14px">' +
         '<div class="sumbox">' +
           row("مجموع فروش", r.totalSales) +

@@ -14,7 +14,8 @@ class ReportsScreen extends StatefulWidget {
 
 class _ReportsScreenState extends State<ReportsScreen> {
   final ReportRepository _repo = ReportRepository();
-  ReportPeriod _period = ReportPeriod.today;
+  // پیش‌فرض «همه» تا داده فوری دیده شود.
+  ReportPeriod _period = ReportPeriod.all;
   ReportData? _data;
   bool _loading = true;
 
@@ -68,6 +69,30 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 : ListView(
                     padding: const EdgeInsets.fromLTRB(14, 4, 14, 24),
                     children: [
+                      if (d.totalSales == 0)
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 6),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: AppTheme.credit.withValues(alpha: 0.12),
+                            border: Border.all(color: AppTheme.credit),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: const Row(
+                            children: [
+                              Text('ℹ️', style: TextStyle(fontSize: 20)),
+                              SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                    'در این دوره فروشی ثبت نشده — دورهٔ «همه» را ببینید یا یک فروش تازه ثبت کنید',
+                                    style: TextStyle(
+                                        fontSize: 13.5,
+                                        fontWeight: FontWeight.w600,
+                                        color: AppTheme.credit)),
+                              ),
+                            ],
+                          ),
+                        ),
                       _card([
                         _row('مجموع فروش', d.totalSales),
                         _row('فروش نقد', d.cash),

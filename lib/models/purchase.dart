@@ -1,3 +1,5 @@
+import 'product.dart';
+
 /// مدل فاکتور خرید (purchases).
 class Purchase {
   final int? id;
@@ -90,19 +92,28 @@ class PurchaseItem {
 }
 
 /// قلم قابل ویرایش هنگام ساختن فاکتور (در حافظه).
+/// اگر `isNew` باشد، `productId` تهی است و این جنس با ثبت فاکتور در اجناس ساخته می‌شود.
 class PurchaseDraftLine {
-  final int productId;
+  int? productId;
   final String productName;
   final String unit;
   double quantity;
   double buyPrice;
 
+  // فقط برای جنس نو
+  final bool isNew;
+  final ProductType? type;
+  final double sellPrice;
+
   PurchaseDraftLine({
-    required this.productId,
+    this.productId,
     required this.productName,
     required this.unit,
     this.quantity = 1,
     this.buyPrice = 0,
+    this.isNew = false,
+    this.type,
+    this.sellPrice = 0,
   });
 
   double get lineTotal => quantity * buyPrice;

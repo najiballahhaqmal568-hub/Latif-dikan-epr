@@ -9,6 +9,9 @@ import '../../repositories/purchase_repository.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatting.dart';
 
+/// نشانهٔ انتخاب «جنس نو» از داخل انتخاب‌گر جنس.
+const String _newProductSentinel = '__new_product__';
+
 /// فورم ساختن فاکتور خرید.
 class PurchaseFormScreen extends StatefulWidget {
   const PurchaseFormScreen({super.key});
@@ -52,36 +55,43 @@ class _PurchaseFormScreenState extends State<PurchaseFormScreen> {
   Future<void> _addLine() async {
     final products = await _productRepo.getAll();
     if (!mounted) return;
-    if (products.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('اول از بخش «اجناس» جنس اضافه کنید')));
-      return;
-    }
-    final existingIds = _lines.map((l) => l.productId).toSet();
+    // اجناسی که قبلاً در فاکتور اضافه شده‌اند را کنار می‌گذاریم؛
+    // انتخاب‌گر همیشه باز می‌شود چون گزینه «جنس نو» هم دارد.
+    final existingIds = _lines.map((l) => l.productId).whereType<int>().toSet();
     final available =
         products.where((p) => !existingIds.contains(p.id)).toList();
-    if (available.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('همه اجناس در فاکتور اضافه شده‌اند')));
-      return;
-    }
-    final picked = await showModalBottomSheet<Product>(
+    final result = await showModalBottomSheet<Object>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
       builder: (_) => _ProductPicker(products: available),
     );
-    if (picked != null) {
+    if (result == null) return;
+    if (result is Product) {
       setState(() {
         _lines.add(PurchaseDraftLine(
-          productId: picked.id!,
-          productName: picked.name,
-          unit: picked.unit,
+          productId: result.id!,
+          productName: result.name,
+          unit: result.unit,
           quantity: 1,
-          buyPrice: picked.buyPrice,
+          buyPrice: result.buyPrice,
         ));
       });
+    } else if (result == _newProductSentinel) {
+      // کاربر «جنس نو» را انتخاب کرد
+      final line = await _newProductForm();
+      if (line != null) setState(() => _lines.add(line));
     }
+  }
+
+  /// فورم کوچک «جنس نو» — نام، نوع، واحد، قیمت فروش. قیمت خرید و تعداد از فاکتور.
+  Future<PurchaseDraftLine?> _newProductForm() async {
+    return showModalBottomSheet<PurchaseDraftLine>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => const _NewProductForm(),
+    );
   }
 
   Future<void> _pickDate() async {
@@ -176,7 +186,7 @@ class _PurchaseFormScreenState extends State<PurchaseFormScreen> {
                   style: TextStyle(color: Colors.grey)),
             ),
           ..._lines.asMap().entries.map((e) => _LineEditor(
-                key: ValueKey(e.value.productId),
+                key: ObjectKey(e.value),
                 line: e.value,
                 onChanged: () => setState(() {}),
                 onRemove: () => setState(() => _lines.removeAt(e.key)),
@@ -391,6 +401,19 @@ class _ProductPicker extends StatelessWidget {
           const Text('انتخاب جنس',
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
           const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: () => Navigator.pop(context, _newProductSentinel),
+            icon: const Icon(Icons.add),
+            label: const Text('جنس نو (که در اجناس نیست)'),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size.fromHeight(52),
+              side: const BorderSide(color: AppTheme.primary, width: 1.5),
+              foregroundColor: AppTheme.primary,
+              textStyle:
+                  const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+          ),
+          const SizedBox(height: 12),
           ConstrainedBox(
             constraints: BoxConstraints(
                 maxHeight: MediaQuery.of(context).size.height * 0.5),
@@ -414,6 +437,146 @@ class _ProductPicker extends StatelessWidget {
                 );
               },
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// فورم کوچک ساختن «جنس نو» داخل فاکتور خرید.
+/// یک `PurchaseDraftLine` نو برمی‌گرداند (isNew=true). قیمت خرید و تعداد در فاکتور پر می‌شود.
+class _NewProductForm extends StatefulWidget {
+  const _NewProductForm();
+
+  @override
+  State<_NewProductForm> createState() => _NewProductFormState();
+}
+
+class _NewProductFormState extends State<_NewProductForm> {
+  final TextEditingController _nameCtrl = TextEditingController();
+  final TextEditingController _sellCtrl = TextEditingController();
+  ProductType _type = ProductType.unit;
+  String _unit = 'piece';
+  bool _nameError = false;
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _sellCtrl.dispose();
+    super.dispose();
+  }
+
+  void _onType(ProductType t) {
+    setState(() {
+      _type = t;
+      _unit = t.defaultUnit;
+    });
+  }
+
+  void _add() {
+    final name = _nameCtrl.text.trim();
+    setState(() => _nameError = name.isEmpty);
+    if (name.isEmpty) return;
+    final sell = double.tryParse(_sellCtrl.text.trim()) ?? 0;
+    Navigator.pop(
+      context,
+      PurchaseDraftLine(
+        productId: null,
+        productName: name,
+        unit: _unit,
+        type: _type,
+        sellPrice: sell,
+        quantity: 1,
+        buyPrice: 0,
+        isNew: true,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 18,
+        right: 18,
+        top: 4,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text('جنس نو',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _nameCtrl,
+            autofocus: true,
+            style: const TextStyle(fontSize: 19),
+            decoration: InputDecoration(
+              labelText: 'نام جنس',
+              prefixIcon: const Icon(Icons.shopping_bag),
+              errorText: _nameError ? 'نام جنس را بنویسید' : null,
+            ),
+            onChanged: (_) {
+              if (_nameError) setState(() => _nameError = false);
+            },
+          ),
+          const SizedBox(height: 16),
+          const Text('نوع جنس',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          SegmentedButton<ProductType>(
+            segments: const [
+              ButtonSegment(
+                  value: ProductType.weighted,
+                  label: Text('وزنی'),
+                  icon: Icon(Icons.scale)),
+              ButtonSegment(
+                  value: ProductType.unit,
+                  label: Text('دانه‌ای'),
+                  icon: Icon(Icons.inventory_2)),
+            ],
+            selected: {_type},
+            onSelectionChanged: (s) => _onType(s.first),
+          ),
+          const SizedBox(height: 16),
+          const Text('واحد',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          SegmentedButton<String>(
+            segments: const [
+              ButtonSegment(value: 'kg', label: Text('کیلو')),
+              ButtonSegment(value: 'piece', label: Text('دانه')),
+            ],
+            selected: {_unit},
+            onSelectionChanged: (s) => setState(() => _unit = s.first),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _sellCtrl,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))
+            ],
+            textDirection: TextDirection.ltr,
+            style: const TextStyle(fontSize: 19),
+            decoration: const InputDecoration(
+              labelText: 'قیمت فروش (افغانی)',
+              prefixIcon: Icon(Icons.sell_outlined),
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text('قیمت خرید و تعداد را در خود فاکتور می‌نویسید.',
+              style: TextStyle(fontSize: 13, color: Colors.grey)),
+          const SizedBox(height: 18),
+          ElevatedButton.icon(
+            onPressed: _add,
+            icon: const Icon(Icons.add),
+            label: const Text('افزودن به فاکتور'),
+            style:
+                ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(56)),
           ),
         ],
       ),

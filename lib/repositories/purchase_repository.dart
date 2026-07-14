@@ -1,6 +1,7 @@
 import 'package:sqflite/sqflite.dart';
 
 import '../db/database_helper.dart';
+import '../models/product.dart';
 import '../models/purchase.dart';
 
 /// ثبت و خواندن فاکتورهای خرید. ثبت فاکتور همه در یک ترنزکشن انجام می‌شود:
@@ -71,9 +72,25 @@ class PurchaseRepository {
       });
 
       for (final l in valid) {
+        // جنس نو: اول در جدول اجناس ساخته شود (تعداد ۰) و آی‌دی آن گرفته شود
+        int productId;
+        if (l.productId == null) {
+          productId = await txn.insert('products', {
+            'name': l.productName,
+            'type': (l.type ?? ProductType.unit).dbValue,
+            'unit': l.unit,
+            'buy_price': l.buyPrice,
+            'sell_price': l.sellPrice,
+            'quantity': 0,
+            'is_popular': 0,
+          });
+        } else {
+          productId = l.productId!;
+        }
+
         await txn.insert('purchase_items', {
           'purchase_id': purchaseId,
-          'product_id': l.productId,
+          'product_id': productId,
           'product_name': l.productName,
           'quantity': l.quantity,
           'buy_price': l.buyPrice,
@@ -81,7 +98,7 @@ class PurchaseRepository {
         // زیادکردن موجودی و تازه‌کردن قیمت خرید
         await txn.rawUpdate(
           'UPDATE products SET quantity = quantity + ?, buy_price = ? WHERE id = ?',
-          [l.quantity, l.buyPrice, l.productId],
+          [l.quantity, l.buyPrice, productId],
         );
       }
 

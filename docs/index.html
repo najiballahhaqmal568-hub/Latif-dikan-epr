@@ -468,7 +468,7 @@
   // ---------- Storage ----------
   var LS_P = "dukan.products.v1", LS_S = "dukan.sales.v1", LS_SEED = "dukan.seeded.v1";
   var LS_SUP = "dukan.suppliers.v1", LS_PUR = "dukan.purchases.v1", LS_CUST = "dukan.customers.v1";
-  var LS_SPAY = "dukan.supPayments.v1", LS_CPAY = "dukan.custPayments.v1", LS_WASTE = "dukan.waste.v1";
+  var LS_SPAY = "dukan.supPayments.v1", LS_CPAY = "dukan.custPayments.v1", LS_WASTE = "dukan.waste.v1", LS_EXP = "dukan.expenses.v1";
   var EXPIRY_WARN_DAYS = 14;
   function load(key, def) { try { return JSON.parse(localStorage.getItem(key)) || def; } catch (e) { return def; } }
   function save(key, val) { localStorage.setItem(key, JSON.stringify(val)); }
@@ -481,6 +481,7 @@
   var supPayments = load(LS_SPAY, []); // رسیدهای پرداخت به تامین‌کننده
   var custPayments = load(LS_CPAY, []); // رسیدهای دریافت از مشتری
   var waste = load(LS_WASTE, []); // ضایعات
+  var expenses = load(LS_EXP, []); // مصارف خانه
   if (products === null) {
     // نمونه‌های اولیه تا فوری امتحان شود (قابل حذف)
     products = [
@@ -1184,12 +1185,68 @@
   function renderMore() {
     var el = $("#moreArea");
     if (moreView === "waste") { renderWaste(el); return; }
+    if (moreView === "expenses") { renderExpenses(el); return; }
     el.innerHTML =
       '<div class="menu-item" data-more="waste">' +
         '<div class="mico">🗑</div>' +
         '<div class="mtx"><b>ضایعات و تاریخ خرابی</b><small>ثبت اجناس خراب/تاریخ‌تیر و اخطار خرابی</small></div>' +
         '<div class="chev">‹</div>' +
+      '</div>' +
+      '<div class="menu-item" data-more="expenses">' +
+        '<div class="mico" style="background:var(--primary-soft);color:var(--primary)">🏠</div>' +
+        '<div class="mtx"><b>مصارف خانه</b><small>پیسه‌ای که از دوکان برای خرچ خانه کشیده می‌شود</small></div>' +
+        '<div class="chev">‹</div>' +
       '</div>';
+  }
+
+  // ---------- Expenses (مصارف خانه) ----------
+  function renderExpenses(el) {
+    var total = 0;
+    expenses.forEach(function (x) { total += x.amount; });
+    var sorted = expenses.slice().sort(function (a, b) { return (b.date || "").localeCompare(a.date || ""); });
+    var listHtml = sorted.length === 0
+      ? '<p style="color:var(--ink-soft);text-align:center;padding:10px;font-size:14px">هنوز مصرفی ثبت نشده</p>'
+      : sorted.map(function (x) {
+          return '<div class="iline"><button class="x" data-delexp="' + x.id + '" aria-label="حذف">×</button>' +
+            '<div class="in"><b>' + esc(x.note || "مصرف") + '</b><small class="num">' + fmtDate(x.date) + '</small></div>' +
+            '<div class="lt num" style="color:var(--credit)">' + money(x.amount) + '</div></div>';
+        }).join("");
+
+    el.innerHTML =
+      '<div class="subhead"><button class="back moreBack" aria-label="بازگشت">→</button><h3>مصارف خانه</h3></div>' +
+      '<div style="padding:10px 14px 4px"><button class="addline" id="newExpenseBtn" style="margin:0;border-color:var(--primary);background:var(--primary-soft);color:var(--primary)">＋ ثبت مصرف جدید</button></div>' +
+      '<div class="listhead">مصارف ثبت‌شده — مجموع: <span style="color:var(--credit)" class="num">' + money(total) + '</span></div>' +
+      listHtml;
+  }
+
+  function openExpenseForm() {
+    openSheet(
+      '<h2>ثبت مصرف خانه</h2>' +
+      '<div class="field"><label>مبلغ (افغانی)</label>' +
+        '<input id="expAmt" type="number" inputmode="decimal" step="any" min="0" placeholder="0" />' +
+        '<div class="err" id="eExpAmt">مبلغ را درست بنویسید</div></div>' +
+      '<div class="field"><label>توضیح (اختیاری)</label>' +
+        '<input id="expNote" type="text" placeholder="مثلاً: نان و سبزی" /></div>' +
+      '<div class="actions"><button class="ghost" data-close>لغو</button>' +
+        '<button class="primary" id="expOk">ثبت مصرف</button></div>'
+    );
+    $("#expOk").addEventListener("click", function () {
+      var amt = parseFloat($("#expAmt").value);
+      var bad = !($("#expAmt").value !== "" && !isNaN(amt) && amt > 0);
+      $("#eExpAmt").classList.toggle("show", bad);
+      if (bad) return;
+      expenses.push({ id: id(), date: new Date().toISOString(), amount: amt, note: $("#expNote").value.trim() });
+      save(LS_EXP, expenses);
+      closeSheet(); renderMore();
+      toast("مصرف ثبت شد ✓");
+    });
+    setTimeout(function () { $("#expAmt").focus(); }, 60);
+  }
+
+  function deleteExpense(eid) {
+    expenses = expenses.filter(function (x) { return x.id !== eid; });
+    save(LS_EXP, expenses); renderMore();
+    toast("مصرف حذف شد");
   }
 
   function expiringProducts() {
@@ -1222,7 +1279,7 @@
         }).join("");
 
     el.innerHTML =
-      '<div class="subhead"><button class="back" id="wasteBack" aria-label="بازگشت">→</button><h3>ضایعات و تاریخ خرابی</h3></div>' +
+      '<div class="subhead"><button class="back moreBack" aria-label="بازگشت">→</button><h3>ضایعات و تاریخ خرابی</h3></div>' +
       '<div class="listhead">اخطار تاریخ خرابی (تا ' + EXPIRY_WARN_DAYS + ' روز)</div>' +
       warnHtml +
       '<div style="padding:10px 14px 4px"><button class="addline" id="newWasteBtn" style="margin:0">＋ ثبت ضایعات جدید</button></div>' +
@@ -1325,9 +1382,11 @@
   });
   $("#moreArea").addEventListener("click", function (e) {
     var m = e.target.closest("[data-more]"); if (m) { moreView = m.dataset.more; renderMore(); return; }
-    if (e.target.closest("#wasteBack")) { moreView = null; renderMore(); return; }
+    if (e.target.closest(".moreBack")) { moreView = null; renderMore(); return; }
     if (e.target.closest("#newWasteBtn")) { openWastePicker(); return; }
-    var w = e.target.closest("[data-wexp]"); if (w) { var p = findP(w.dataset.wexp); if (p) openWasteForm(p, "expired"); }
+    var w = e.target.closest("[data-wexp]"); if (w) { var p = findP(w.dataset.wexp); if (p) openWasteForm(p, "expired"); return; }
+    if (e.target.closest("#newExpenseBtn")) { openExpenseForm(); return; }
+    var de = e.target.closest("[data-delexp]"); if (de) { deleteExpense(de.dataset.delexp); }
   });
 
   $("#search").addEventListener("input", function () {

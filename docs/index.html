@@ -1200,6 +1200,13 @@
   }
 
   // ---------- Expenses (مصارف خانه) ----------
+  // مبلغ مؤثر یک مصرف = مبلغ اصلی + مجموع اصلاحیه‌های آن.
+  function expenseEffective(origId) {
+    var s = 0;
+    expenses.forEach(function (x) { if (x.id === origId || x.correctionOf === origId) s += x.amount; });
+    return s;
+  }
+
   function renderExpenses(el) {
     var total = 0;
     expenses.forEach(function (x) { total += x.amount; });
@@ -1207,7 +1214,14 @@
     var listHtml = sorted.length === 0
       ? '<p style="color:var(--ink-soft);text-align:center;padding:10px;font-size:14px">هنوز مصرفی ثبت نشده</p>'
       : sorted.map(function (x) {
+          if (x.correctionOf) {
+            var sign = x.amount < 0 ? "" : "+";
+            return '<div class="iline">' +
+              '<div class="in"><b><span class="reason-badge">اصلاحیه</span> ' + esc(x.note || "") + '</b><small class="num">' + fmtDate(x.date) + '</small></div>' +
+              '<div class="lt num" style="color:var(--danger)">' + sign + money(x.amount) + '</div></div>';
+          }
           return '<div class="iline">' +
+            '<button class="wbtn" data-correct="' + x.id + '" style="background:var(--credit)">اصلاح</button>' +
             '<div class="in"><b>' + esc(x.note || "مصرف") + '</b><small class="num">' + fmtDate(x.date) + '</small></div>' +
             '<div class="lt num" style="color:var(--credit)">' + money(x.amount) + '</div></div>';
         }).join("");
@@ -1241,6 +1255,33 @@
       toast("مصرف ثبت شد ✓");
     });
     setTimeout(function () { $("#expAmt").focus(); }, 60);
+  }
+
+  function openCorrectionForm(orig) {
+    var eff = expenseEffective(orig.id);
+    openSheet(
+      '<h2>اصلاح مصرف</h2>' +
+      '<p style="margin:-6px 0 12px;color:var(--ink-soft);font-size:14px">' + esc(orig.note || "مصرف") + ' • مبلغ فعلی: <b class="num">' + money(eff) + '</b></p>' +
+      '<div class="field"><label>مبلغ درست (افغانی)</label>' +
+        '<input id="corAmt" type="number" inputmode="decimal" step="any" min="0" value="' + eff + '" />' +
+        '<div class="err" id="eCorAmt">مبلغ را درست بنویسید</div></div>' +
+      '<p style="color:var(--ink-soft);font-size:13px;margin:-4px 0 12px">مصرف اصلی پاک نمی‌شود؛ فقط یک «اصلاحیه» برای فرق ثبت می‌شود.</p>' +
+      '<div class="actions"><button class="ghost" data-close>لغو</button>' +
+        '<button class="primary" id="corOk">ثبت اصلاحیه</button></div>'
+    );
+    $("#corOk").addEventListener("click", function () {
+      var val = parseFloat($("#corAmt").value);
+      var bad = !($("#corAmt").value !== "" && !isNaN(val) && val >= 0);
+      $("#eCorAmt").classList.toggle("show", bad);
+      if (bad) return;
+      var diff = +(val - eff).toFixed(2);
+      if (diff === 0) { closeSheet(); toast("فرقی نبود"); return; }
+      expenses.push({ id: id(), date: new Date().toISOString(), amount: diff, note: "اصلاحیه: " + (orig.note || "مصرف"), correctionOf: orig.id });
+      save(LS_EXP, expenses);
+      closeSheet(); renderMore();
+      toast("اصلاحیه ثبت شد ✓");
+    });
+    setTimeout(function () { var i = $("#corAmt"); i.focus(); i.select(); }, 60);
   }
 
 
@@ -1381,6 +1422,7 @@
     if (e.target.closest("#newWasteBtn")) { openWastePicker(); return; }
     var w = e.target.closest("[data-wexp]"); if (w) { var p = findP(w.dataset.wexp); if (p) openWasteForm(p, "expired"); return; }
     if (e.target.closest("#newExpenseBtn")) { openExpenseForm(); return; }
+    var cor = e.target.closest("[data-correct]"); if (cor) { var ex = null; for (var i = 0; i < expenses.length; i++) if (expenses[i].id === cor.dataset.correct) ex = expenses[i]; if (ex) openCorrectionForm(ex); }
   });
 
   $("#search").addEventListener("input", function () {

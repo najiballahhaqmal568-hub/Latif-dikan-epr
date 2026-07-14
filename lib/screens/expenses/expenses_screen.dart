@@ -53,6 +53,27 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     _load();
   }
 
+  Future<void> _correct(Expense e) async {
+    final eff = await _repo.effectiveAmount(e.id!);
+    if (!mounted) return;
+    final correctAmount = await showDialog<double>(
+      context: context,
+      builder: (_) => _CorrectionDialog(original: e, effective: eff),
+    );
+    if (correctAmount == null) return;
+    final done =
+        await _repo.correct(original: e, correctAmount: correctAmount, effective: eff);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(done ? 'اصلاحیه ثبت شد ✓' : 'فرقی نبود')));
+    if (done) _load();
+  }
+
+  String _signedMoney(double amount) {
+    final s = formatAfghani(amount);
+    return amount > 0 ? '+$s' : s; // منفی خودش علامت دارد
+  }
+
   String _shortDate(String iso) {
     final d = DateTime.tryParse(iso);
     if (d == null) return iso;
@@ -112,24 +133,71 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                           itemCount: _list.length,
                           itemBuilder: (context, i) {
                             final e = _list[i];
+                            final isCorr = e.isCorrection;
                             return Card(
                               margin: const EdgeInsets.symmetric(
                                   horizontal: 14, vertical: 5),
                               child: ListTile(
-                                title: Text(
-                                    (e.note == null || e.note!.isEmpty)
-                                        ? 'مصرف'
-                                        : e.note!,
-                                    style: const TextStyle(
-                                        fontSize: 17,
-                                        fontWeight: FontWeight.bold)),
+                                title: Row(
+                                  children: [
+                                    if (isCorr)
+                                      Container(
+                                        margin:
+                                            const EdgeInsets.only(left: 6),
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 8, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: AppTheme.credit
+                                              .withValues(alpha: 0.15),
+                                          borderRadius:
+                                              BorderRadius.circular(20),
+                                        ),
+                                        child: const Text('اصلاحیه',
+                                            style: TextStyle(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.bold,
+                                                color: AppTheme.credit)),
+                                      ),
+                                    Expanded(
+                                      child: Text(
+                                          (e.note == null || e.note!.isEmpty)
+                                              ? 'مصرف'
+                                              : e.note!,
+                                          style: const TextStyle(
+                                              fontSize: 17,
+                                              fontWeight: FontWeight.bold)),
+                                    ),
+                                  ],
+                                ),
                                 subtitle: Text(_shortDate(e.date),
                                     style: const TextStyle(fontSize: 13)),
-                                trailing: Text(formatAfghani(e.amount),
-                                    style: const TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.bold,
-                                        color: AppTheme.credit)),
+                                trailing: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      isCorr
+                                          ? _signedMoney(e.amount)
+                                          : formatAfghani(e.amount),
+                                      style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold,
+                                          color: isCorr
+                                              ? AppTheme.danger
+                                              : AppTheme.credit),
+                                    ),
+                                    if (!isCorr)
+                                      TextButton(
+                                        onPressed: () => _correct(e),
+                                        style: TextButton.styleFrom(
+                                            foregroundColor: AppTheme.credit,
+                                            padding: const EdgeInsets.only(
+                                                right: 6, left: 4)),
+                                        child: const Text('اصلاح',
+                                            style: TextStyle(
+                                                fontWeight: FontWeight.bold)),
+                                      ),
+                                  ],
+                                ),
                               ),
                             );
                           },
@@ -227,6 +295,80 @@ class _ExpenseFormState extends State<_ExpenseForm> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// دیالوگ اصلاح مبلغ یک مصرف — مبلغ درست را می‌گیرد (اصلاحیه خودکار ساخته می‌شود).
+class _CorrectionDialog extends StatefulWidget {
+  final Expense original;
+  final double effective;
+
+  const _CorrectionDialog({required this.original, required this.effective});
+
+  @override
+  State<_CorrectionDialog> createState() => _CorrectionDialogState();
+}
+
+class _CorrectionDialogState extends State<_CorrectionDialog> {
+  late final TextEditingController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    final v = widget.effective;
+    _ctrl = TextEditingController(
+        text: v == v.roundToDouble() ? v.toInt().toString() : v.toString());
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('اصلاح مصرف'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+              '${widget.original.note ?? 'مصرف'} • مبلغ فعلی: ${formatAfghani(widget.effective)}',
+              style: const TextStyle(fontSize: 14)),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _ctrl,
+            autofocus: true,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))
+            ],
+            textDirection: TextDirection.ltr,
+            style: const TextStyle(fontSize: 20),
+            decoration: const InputDecoration(
+              labelText: 'مبلغ درست (افغانی)',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text('مصرف اصلی پاک نمی‌شود؛ فقط یک «اصلاحیه» برای فرق ثبت می‌شود.',
+              style: TextStyle(fontSize: 12.5, color: Colors.grey)),
+        ],
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context), child: const Text('لغو')),
+        ElevatedButton(
+          onPressed: () {
+            final v = double.tryParse(_ctrl.text.trim());
+            if (v != null && v >= 0) Navigator.pop(context, v);
+          },
+          child: const Text('ثبت اصلاحیه'),
+        ),
+      ],
     );
   }
 }

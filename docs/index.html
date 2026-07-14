@@ -604,7 +604,7 @@
     if (cart.length === 0) return;
     var items = cart.map(function (l) {
       var p = findP(l.productId);
-      return { productId: p.id, productName: p.name, quantity: l.qty, sellPrice: p.sell };
+      return { productId: p.id, productName: p.name, quantity: l.qty, sellPrice: p.sell, buyPrice: p.buy || 0 };
     });
     var total = cartTotal();
     var nm = (customerName || "").trim();
@@ -1223,7 +1223,8 @@
       if (s.paymentType === "cash") r.cash += s.total; else r.credit += s.total;
       (s.items || []).forEach(function (it) {
         var p = findP(it.productId);
-        var buy = p ? (p.buy || 0) : 0;
+        // قیمت خرید لحظهٔ فروش؛ اگر نبود (فروش قدیمی) قیمت خرید فعلی
+        var buy = (it.buyPrice != null) ? it.buyPrice : (p ? (p.buy || 0) : 0);
         var cost = it.quantity * buy;
         var prof = it.quantity * (it.sellPrice - buy);
         r.cogs += cost;
@@ -1254,7 +1255,7 @@
       ? '<p style="color:var(--ink-soft);text-align:center;padding:10px;font-size:14px">در این دوره فروشی نبوده</p>'
       : prods.map(function (p) {
           var col = p.profit >= 0 ? "var(--primary)" : "var(--danger)";
-          return '<div class="iline"><div class="in"><b>' + esc(p.name) + '</b><small class="num">فروش: ' + money(p.sales) + ' • تعداد: ' + formatQuantity(p.qty) + '</small></div>' +
+          return '<div class="iline"><div class="in"><b>' + esc(p.name) + '</b><small class="num">فروش: ' + money(p.sales) + ' • تعداد: ' + nf.format(p.qty) + '</small></div>' +
             '<div class="lt num" style="color:' + col + '">' + money(p.profit) + '</div></div>';
         }).join("");
 

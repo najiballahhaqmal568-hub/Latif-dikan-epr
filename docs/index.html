@@ -240,8 +240,8 @@
     border-top: 1px solid var(--line);
   }
   nav.tabs button {
-    flex: 1; border: 0; background: transparent; color: var(--ink-soft);
-    font: inherit; font-size: 13.5px; font-weight: 700; cursor: pointer;
+    flex: 1; min-width: 0; border: 0; background: transparent; color: var(--ink-soft);
+    font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap;
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
   }
   nav.tabs button.active { color: var(--primary); }
@@ -318,6 +318,36 @@
   .toast.warn .msg { background: var(--danger); color: #fff; }
 
   button:focus-visible, input:focus-visible { outline: 3px solid var(--primary); outline-offset: 2px; }
+
+  /* Purchase / supplier */
+  .listhead { padding: 14px 16px 2px; font-size: 15px; color: var(--ink-soft); font-weight: 800; }
+  .sumbox { background: var(--surface-2); border: 1.5px solid var(--line); border-radius: 14px; padding: 10px 14px; margin: 6px 0 14px; }
+  .sumrow { display: flex; justify-content: space-between; padding: 4px 0; font-size: 16px; }
+  .sumrow.total { font-size: 19px; font-weight: 800; border-top: 1px solid var(--line); margin-top: 4px; padding-top: 8px; }
+  .sumrow .rem { color: var(--danger); font-weight: 800; }
+  .sumrow .paid { color: var(--primary); font-weight: 800; }
+  .iline { display: flex; align-items: center; gap: 8px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+  .iline:last-child { border-bottom: 0; }
+  .iline .x { width: 30px; height: 30px; flex: 0 0 auto; border-radius: 8px; border: 0; background: var(--danger-soft); color: var(--danger); font-size: 19px; cursor: pointer; display: grid; place-items: center; }
+  .iline .in { flex: 1 1 auto; min-width: 0; }
+  .iline .in b { font-size: 16px; display: block; }
+  .iline .miniflds { display: flex; gap: 7px; margin-top: 5px; }
+  .iline .miniflds label { flex: 1; font-size: 11.5px; color: var(--ink-soft); font-weight: 700; }
+  .iline .miniflds input { width: 100%; direction: ltr; text-align: right; border: 1.5px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 9px; padding: 8px; font: inherit; font-size: 15px; outline: 0; margin-top: 2px; }
+  .iline .miniflds input:focus { border-color: var(--primary); }
+  .iline .lt { font-weight: 800; white-space: nowrap; font-size: 15px; align-self: flex-start; }
+  .addline { width: 100%; border: 1.5px dashed var(--primary); background: var(--primary-soft); color: var(--primary); font: inherit; font-size: 16px; font-weight: 800; padding: 13px; border-radius: 12px; cursor: pointer; margin: 8px 0 14px; }
+  .pcard { background: var(--surface); margin: 8px 14px; padding: 13px 15px; border: 1.5px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); cursor: pointer; }
+  .pcard .r1 { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .pcard .r1 b { font-size: 17px; font-weight: 800; }
+  .pcard .r1 .dt { font-size: 13px; color: var(--ink-soft); white-space: nowrap; }
+  .pcard .r2 { display: flex; justify-content: space-between; margin-top: 6px; font-size: 14px; color: var(--ink-soft); }
+  .pcard .rem { color: var(--danger); font-weight: 800; }
+  .pcard .paidz { color: var(--primary); font-weight: 800; }
+  .pick { max-height: 52dvh; overflow-y: auto; margin: 4px 0 8px; }
+  .pick-item { display: flex; justify-content: space-between; align-items: center; padding: 13px 12px; border: 1.5px solid var(--line); border-radius: 12px; margin-bottom: 8px; cursor: pointer; background: var(--surface-2); }
+  .pick-item b { font-size: 16px; }
+  .pick-item small { color: var(--ink-soft); font-size: 13px; }
 </style>
 
 <div class="app">
@@ -346,6 +376,18 @@
     <section class="screen" id="scr-products">
       <div class="listwrap" id="prodList"></div>
     </section>
+
+    <!-- Purchases screen -->
+    <section class="screen" id="scr-purchases">
+      <div class="listhead">فاکتورهای خرید</div>
+      <div class="listwrap" id="purchaseList"></div>
+    </section>
+
+    <!-- Suppliers screen -->
+    <section class="screen" id="scr-suppliers">
+      <div class="listhead">تامین‌کننده‌ها و قرض</div>
+      <div class="listwrap" id="supplierList"></div>
+    </section>
   </main>
 
   <!-- Cart (sales only) -->
@@ -365,10 +407,16 @@
   <div class="fab" id="fab" style="display:none">
     <button id="btnAdd">＋ جنس جدید</button>
   </div>
+  <!-- New purchase FAB (purchases screen) -->
+  <div class="fab" id="fabBuy" style="display:none">
+    <button id="btnNewPurchase">＋ فاکتور خرید جدید</button>
+  </div>
 
   <nav class="tabs">
     <button class="active" id="tab-sales" data-scr="sales"><span class="dico">🧾</span>فروش</button>
     <button id="tab-products" data-scr="products"><span class="dico">📦</span>اجناس</button>
+    <button id="tab-purchases" data-scr="purchases"><span class="dico">🛒</span>خرید</button>
+    <button id="tab-suppliers" data-scr="suppliers"><span class="dico">🤝</span>تامین‌کننده</button>
   </nav>
 </div>
 
@@ -380,11 +428,14 @@
 (function () {
   // ---------- Storage ----------
   var LS_P = "dukan.products.v1", LS_S = "dukan.sales.v1", LS_SEED = "dukan.seeded.v1";
+  var LS_SUP = "dukan.suppliers.v1", LS_PUR = "dukan.purchases.v1";
   function load(key, def) { try { return JSON.parse(localStorage.getItem(key)) || def; } catch (e) { return def; } }
   function save(key, val) { localStorage.setItem(key, JSON.stringify(val)); }
 
   var products = load(LS_P, null);
   var sales = load(LS_S, []);
+  var suppliers = load(LS_SUP, []);
+  var purchases = load(LS_PUR, []);
   if (products === null) {
     // نمونه‌های اولیه تا فوری امتحان شود (قابل حذف)
     products = [
@@ -410,8 +461,11 @@
   function unitLabel(u) { return u === "kg" ? "کیلو" : (u === "gb" ? "جی‌بی" : "دانه"); }
   function qtyUnit(n, u) { return nf.format(n) + " " + unitLabel(u); }
   function findP(pid) { for (var i = 0; i < products.length; i++) if (products[i].id === pid) return products[i]; return null; }
+  function findS(sid) { for (var i = 0; i < suppliers.length; i++) if (suppliers[i].id === sid) return suppliers[i]; return null; }
   function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
   function $(s) { return document.querySelector(s); }
+  function fmtDate(iso) { if (!iso) return ""; var d = new Date(iso); if (isNaN(d)) return iso; var p = function (n) { return (n < 10 ? "0" : "") + n; }; return d.getFullYear() + "/" + p(d.getMonth() + 1) + "/" + p(d.getDate()); }
+  function todayISO() { return new Date().toISOString().slice(0, 10); }
 
   var toastTimer;
   function toast(msg, warn) {
@@ -671,6 +725,244 @@
     });
   }
 
+  // ---------- Purchases (فاکتور خرید) ----------
+  function findPurchase(pid) { for (var i = 0; i < purchases.length; i++) if (purchases[i].id === pid) return purchases[i]; return null; }
+
+  function renderPurchases() {
+    var el = $("#purchaseList");
+    if (purchases.length === 0) {
+      el.innerHTML = '<div class="empty"><div class="big">🛒</div><p>هنوز فاکتور خریدی ثبت نشده.<br>دکمه «فاکتور خرید جدید» را بزنید.</p></div>';
+      return;
+    }
+    var sorted = purchases.slice().sort(function (a, b) { return (b.date || "").localeCompare(a.date || ""); });
+    el.innerHTML = sorted.map(function (pu) {
+      var rem = pu.remaining > 0 ? '<span class="rem num">باقی: ' + money(pu.remaining) + '</span>' : '<span class="paidz">تصفیه شد</span>';
+      return '<div class="pcard" data-purchase="' + pu.id + '">' +
+        '<div class="r1"><b>' + esc(pu.supplierName || "بدون نام") + '</b><span class="dt num">' + fmtDate(pu.date) + '</span></div>' +
+        '<div class="r2"><span class="num">مجموع: ' + money(pu.total) + '</span>' + rem + '</div></div>';
+    }).join("");
+  }
+
+  function openPurchaseDetail(pu) {
+    var rows = pu.items.map(function (it) {
+      return '<div class="iline"><div class="in"><b>' + esc(it.productName) + '</b><small class="num">' + nf.format(it.qty) + ' × ' + money(it.buyPrice) + '</small></div>' +
+        '<div class="lt num">' + money(it.qty * it.buyPrice) + '</div></div>';
+    }).join("");
+    openSheet(
+      '<h2>فاکتور ' + esc(pu.supplierName || "") + '</h2>' +
+      '<p style="margin:-6px 0 12px;color:var(--ink-soft);font-size:14px" class="num">تاریخ: ' + fmtDate(pu.date) + '</p>' +
+      rows +
+      '<div class="sumbox">' +
+        '<div class="sumrow"><span>مجموع فاکتور</span><span class="num">' + money(pu.total) + '</span></div>' +
+        '<div class="sumrow"><span>پرداخت‌شده</span><span class="paid num">' + money(pu.paid) + '</span></div>' +
+        '<div class="sumrow total"><span>باقی‌مانده (قرض)</span><span class="rem num">' + money(pu.remaining) + '</span></div>' +
+      '</div>' +
+      '<div class="actions"><button class="primary" data-close>بستن</button></div>'
+    );
+  }
+
+  // Invoice builder (draft in memory)
+  var draft = null;
+  function syncDraftInputs() {
+    if (!draft) return;
+    var sn = $("#pSupplier"), ph = $("#pPhone"), dt = $("#pDate"), pd = $("#pPaid");
+    if (sn) draft.supplierName = sn.value;
+    if (ph) draft.phone = ph.value;
+    if (dt) draft.date = dt.value;
+    if (pd) draft.paid = parseFloat(pd.value) || 0;
+  }
+  function draftTotal() { var s = 0; draft.lines.forEach(function (l) { s += (l.qty || 0) * (l.buyPrice || 0); }); return s; }
+
+  function openPurchaseForm() {
+    if (products.length === 0) { toast("اول از بخش «اجناس» جنس اضافه کنید", true); return; }
+    draft = { supplierName: "", phone: "", date: todayISO(), lines: [], paid: 0 };
+    renderPurchaseForm();
+  }
+
+  function renderPurchaseForm() {
+    var total = draftTotal();
+    var rem = Math.max(0, total - (draft.paid || 0));
+    var lines = draft.lines.length === 0
+      ? '<p style="color:var(--ink-soft);font-size:14px;text-align:center;padding:6px 0">هنوز جنسی اضافه نشده</p>'
+      : draft.lines.map(function (l, i) {
+          return '<div class="iline">' +
+            '<button class="x" data-rline="' + i + '" aria-label="حذف">×</button>' +
+            '<div class="in"><b>' + esc(l.name) + '</b>' +
+              '<div class="miniflds">' +
+                '<label>تعداد (' + unitLabel(l.unit) + ')<input type="number" inputmode="decimal" step="any" min="0" data-lqty="' + i + '" value="' + l.qty + '" /></label>' +
+                '<label>قیمت خرید<input type="number" inputmode="decimal" step="any" min="0" data-lbuy="' + i + '" value="' + l.buyPrice + '" /></label>' +
+              '</div>' +
+            '</div>' +
+            '<div class="lt num" data-llt="' + i + '">' + money((l.qty || 0) * (l.buyPrice || 0)) + '</div>' +
+          '</div>';
+        }).join("");
+
+    openSheet(
+      '<h2>فاکتور خرید جدید</h2>' +
+      '<div class="field"><label>نام تامین‌کننده</label>' +
+        '<input id="pSupplier" type="text" value="' + esc(draft.supplierName) + '" placeholder="نام تامین‌کننده" />' +
+        '<div class="err" id="ePSup">نام تامین‌کننده را بنویسید</div></div>' +
+      '<div class="field"><label>نمبر تیلفون (اختیاری)</label>' +
+        '<input id="pPhone" type="text" inputmode="tel" value="' + esc(draft.phone) + '" placeholder="07..." /></div>' +
+      '<div class="field"><label>تاریخ</label>' +
+        '<input id="pDate" type="date" value="' + (draft.date || "") + '" /></div>' +
+      '<label style="font-size:15px;font-weight:800;color:var(--ink-soft)">اجناس فاکتور</label>' +
+      '<div style="margin-top:6px">' + lines + '</div>' +
+      '<button class="addline" id="pAddLine">＋ افزودن جنس</button>' +
+      '<div class="field"><label>پرداخت شد (افغانی)</label>' +
+        '<input id="pPaid" type="number" inputmode="decimal" step="any" min="0" value="' + (draft.paid || "") + '" placeholder="0" /></div>' +
+      '<div class="sumbox">' +
+        '<div class="sumrow"><span>مجموع فاکتور</span><span class="num" id="pTotal">' + money(total) + '</span></div>' +
+        '<div class="sumrow total"><span>باقی‌مانده (قرض)</span><span class="rem num" id="pRem">' + money(rem) + '</span></div>' +
+      '</div>' +
+      '<div class="actions"><button class="ghost" data-close>لغو</button>' +
+        '<button class="primary" id="pSave">💾 ثبت فاکتور</button></div>'
+    );
+
+    function recompute() {
+      var t = draftTotal(); var r = Math.max(0, t - (parseFloat($("#pPaid").value) || 0));
+      $("#pTotal").textContent = money(t); $("#pRem").textContent = money(r);
+    }
+    sheet.querySelectorAll("[data-lqty]").forEach(function (inp) {
+      inp.addEventListener("input", function () {
+        var i = +inp.dataset.lqty; draft.lines[i].qty = parseFloat(inp.value) || 0;
+        var lt = sheet.querySelector('[data-llt="' + i + '"]'); if (lt) lt.textContent = money(draft.lines[i].qty * draft.lines[i].buyPrice);
+        recompute();
+      });
+    });
+    sheet.querySelectorAll("[data-lbuy]").forEach(function (inp) {
+      inp.addEventListener("input", function () {
+        var i = +inp.dataset.lbuy; draft.lines[i].buyPrice = parseFloat(inp.value) || 0;
+        var lt = sheet.querySelector('[data-llt="' + i + '"]'); if (lt) lt.textContent = money(draft.lines[i].qty * draft.lines[i].buyPrice);
+        recompute();
+      });
+    });
+    sheet.querySelectorAll("[data-rline]").forEach(function (b) {
+      b.addEventListener("click", function () { syncDraftInputs(); draft.lines.splice(+b.dataset.rline, 1); renderPurchaseForm(); });
+    });
+    $("#pPaid").addEventListener("input", recompute);
+    $("#pAddLine").addEventListener("click", function () { syncDraftInputs(); openLinePicker(); });
+    $("#pSave").addEventListener("click", savePurchase);
+  }
+
+  function openLinePicker() {
+    var existingIds = draft.lines.map(function (l) { return l.productId; });
+    var avail = products.filter(function (p) { return existingIds.indexOf(p.id) === -1; });
+    var list = avail.length === 0
+      ? '<p style="color:var(--ink-soft);text-align:center;padding:10px">همه اجناس در فاکتور اضافه شده‌اند</p>'
+      : avail.map(function (p) {
+          return '<div class="pick-item" data-pick="' + p.id + '"><b>' + esc(p.name) + '</b><small class="num">موجود: ' + qtyUnit(p.qty, p.unit) + '</small></div>';
+        }).join("");
+    openSheet(
+      '<h2>انتخاب جنس</h2>' +
+      '<div class="pick">' + list + '</div>' +
+      '<div class="actions"><button class="primary" id="pickBack">بازگشت به فاکتور</button></div>'
+    );
+    sheet.querySelectorAll("[data-pick]").forEach(function (it) {
+      it.addEventListener("click", function () {
+        var p = findP(it.dataset.pick);
+        draft.lines.push({ productId: p.id, name: p.name, unit: p.unit, qty: 1, buyPrice: p.buy || 0 });
+        renderPurchaseForm();
+      });
+    });
+    $("#pickBack").addEventListener("click", renderPurchaseForm);
+  }
+
+  function savePurchase() {
+    syncDraftInputs();
+    var name = (draft.supplierName || "").trim();
+    var okName = !!name;
+    if ($("#ePSup")) $("#ePSup").classList.toggle("show", !okName);
+    var validLines = draft.lines.filter(function (l) { return l.qty > 0; });
+    if (!okName) return;
+    if (validLines.length === 0) { toast("حداقل یک جنس با تعداد بیشتر از صفر اضافه کنید", true); return; }
+
+    var total = 0; validLines.forEach(function (l) { total += l.qty * l.buyPrice; });
+    var paid = draft.paid || 0;
+    var remaining = Math.max(0, total - paid);
+
+    var sup = null;
+    for (var i = 0; i < suppliers.length; i++) { if (suppliers[i].name.trim().toLowerCase() === name.toLowerCase()) { sup = suppliers[i]; break; } }
+    if (!sup) { sup = { id: id(), name: name, phone: draft.phone || "", debt: 0 }; suppliers.push(sup); }
+    else if (draft.phone && !sup.phone) sup.phone = draft.phone;
+
+    validLines.forEach(function (l) {
+      var p = findP(l.productId);
+      if (p) { p.qty = +(p.qty + l.qty).toFixed(3); p.buy = l.buyPrice; }
+    });
+    sup.debt = +(sup.debt + remaining).toFixed(2);
+
+    purchases.push({
+      id: id(), supplierId: sup.id, supplierName: sup.name, date: draft.date || todayISO(),
+      total: total, paid: paid, remaining: remaining,
+      items: validLines.map(function (l) { return { productId: l.productId, productName: l.name, qty: l.qty, buyPrice: l.buyPrice }; })
+    });
+
+    save(LS_PUR, purchases); save(LS_SUP, suppliers); save(LS_P, products);
+    draft = null; closeSheet();
+    renderPurchases(); renderSuppliers(); renderProducts(); renderSaleGrid();
+    toast("فاکتور خرید ثبت شد ✓ موجودی زیاد شد");
+  }
+
+  // ---------- Suppliers (قرض تامین‌کننده) ----------
+  function renderSuppliers() {
+    var el = $("#supplierList");
+    if (suppliers.length === 0) {
+      el.innerHTML = '<div class="empty"><div class="big">🤝</div><p>هنوز تامین‌کننده‌ای نیست.<br>با ثبت فاکتور خرید، تامین‌کننده ساخته می‌شود.</p></div>';
+      return;
+    }
+    var sorted = suppliers.slice().sort(function (a, b) { return b.debt - a.debt; });
+    el.innerHTML = sorted.map(function (s) {
+      var low = s.debt > 0;
+      return '<div class="prow u">' +
+        '<div class="tapzone" data-supplier="' + s.id + '" role="button" tabindex="0">' +
+          '<div class="ico">🤝</div>' +
+          '<div class="info"><b>' + esc(s.name) + '</b><small>' + (s.phone ? esc(s.phone) : "بدون نمبر") + '</small></div>' +
+        '</div>' +
+        '<div class="qty"><div class="q num ' + (low ? "low" : "") + '">' + money(s.debt) + '</div><small>' + (low ? "قرض ما" : "تصفیه") + '</small></div>' +
+        '</div>';
+    }).join("");
+  }
+
+  function openSupplierDetail(s) {
+    var theirs = purchases.filter(function (p) { return p.supplierId === s.id; })
+      .sort(function (a, b) { return (b.date || "").localeCompare(a.date || ""); });
+    var rows = theirs.length === 0 ? '<p style="color:var(--ink-soft);text-align:center;padding:8px">فاکتوری نیست</p>'
+      : theirs.map(function (pu) {
+          return '<div class="iline"><div class="in"><b class="num">' + fmtDate(pu.date) + '</b><small class="num">مجموع: ' + money(pu.total) + ' • پرداخت: ' + money(pu.paid) + '</small></div><div class="lt num">' + (pu.remaining > 0 ? '<span style="color:var(--danger)">' + money(pu.remaining) + '</span>' : '✓') + '</div></div>';
+        }).join("");
+    openSheet(
+      '<h2>' + esc(s.name) + '</h2>' +
+      (s.phone ? '<p style="margin:-6px 0 10px;color:var(--ink-soft)" class="num">' + esc(s.phone) + '</p>' : '') +
+      '<div class="sumbox"><div class="sumrow total"><span>مجموع قرض ما</span><span class="rem num">' + money(s.debt) + '</span></div></div>' +
+      (s.debt > 0 ? '<button class="addline" id="payBtn" style="border-style:solid;background:var(--primary);color:var(--primary-ink);border-color:var(--primary)">💵 پرداخت به تامین‌کننده</button>' : '') +
+      '<label style="font-size:15px;font-weight:800;color:var(--ink-soft)">فاکتورها</label>' +
+      '<div style="margin-top:6px">' + rows + '</div>' +
+      '<div class="actions"><button class="primary" data-close>بستن</button></div>'
+    );
+    if (s.debt > 0) $("#payBtn").addEventListener("click", function () { openPayDialog(s); });
+  }
+
+  function openPayDialog(s) {
+    openSheet(
+      '<h2>پرداخت به ' + esc(s.name) + '</h2>' +
+      '<p style="margin:-6px 0 12px;color:var(--ink-soft)">قرض فعلی: <b class="num">' + money(s.debt) + '</b></p>' +
+      '<div class="field"><label>مقدار پرداخت (افغانی)</label>' +
+        '<input id="payAmt" type="number" inputmode="decimal" step="any" min="0" placeholder="0" /></div>' +
+      '<div class="actions"><button class="ghost" data-close>لغو</button>' +
+        '<button class="primary" id="payOk">ثبت پرداخت</button></div>'
+    );
+    $("#payOk").addEventListener("click", function () {
+      var amt = parseFloat($("#payAmt").value) || 0;
+      if (amt <= 0) return;
+      s.debt = +Math.max(0, s.debt - amt).toFixed(2);
+      save(LS_SUP, suppliers);
+      closeSheet(); renderSuppliers();
+      toast("پرداخت ثبت شد ✓");
+    });
+    setTimeout(function () { $("#payAmt").focus(); }, 60);
+  }
+
   // ---------- Events ----------
   $("#saleGrid").addEventListener("click", function (e) {
     var t = e.target.closest(".tile"); if (t) onTileTap(t.dataset.id);
@@ -693,6 +985,17 @@
   });
   $("#btnAdd").addEventListener("click", function () { openProductForm(null); });
 
+  $("#btnNewPurchase").addEventListener("click", openPurchaseForm);
+  $("#purchaseList").addEventListener("click", function (e) {
+    var c = e.target.closest("[data-purchase]"); if (c) { var pu = findPurchase(c.dataset.purchase); if (pu) openPurchaseDetail(pu); }
+  });
+  $("#supplierList").addEventListener("click", function (e) {
+    var c = e.target.closest("[data-supplier]"); if (c) { var s = findS(c.dataset.supplier); if (s) openSupplierDetail(s); }
+  });
+  $("#supplierList").addEventListener("keydown", function (e) {
+    if (e.key === "Enter" || e.key === " ") { var c = e.target.closest("[data-supplier]"); if (c) { e.preventDefault(); var s = findS(c.dataset.supplier); if (s) openSupplierDetail(s); } }
+  });
+
   $("#search").addEventListener("input", function () {
     $("#searchClr").style.display = this.value ? "block" : "none";
     renderSaleGrid();
@@ -705,14 +1008,19 @@
   // Tabs
   function switchTab(scr) {
     currentTab = scr;
-    $("#scr-sales").classList.toggle("active", scr === "sales");
-    $("#scr-products").classList.toggle("active", scr === "products");
-    $("#tab-sales").classList.toggle("active", scr === "sales");
-    $("#tab-products").classList.toggle("active", scr === "products");
+    ["sales", "products", "purchases", "suppliers"].forEach(function (s) {
+      $("#scr-" + s).classList.toggle("active", s === scr);
+      $("#tab-" + s).classList.toggle("active", s === scr);
+    });
     $("#cartbar").style.display = scr === "sales" ? "block" : "none";
     $("#fab").style.display = scr === "products" ? "flex" : "none";
-    $("#hsub").textContent = scr === "sales" ? "فروش تیز" : "اجناس و موجودی";
-    if (scr === "products") renderProducts(); else renderSaleGrid();
+    $("#fabBuy").style.display = scr === "purchases" ? "flex" : "none";
+    var subs = { sales: "فروش تیز", products: "اجناس و موجودی", purchases: "فاکتور خرید", suppliers: "قرض تامین‌کننده" };
+    $("#hsub").textContent = subs[scr] || "";
+    if (scr === "products") renderProducts();
+    else if (scr === "purchases") renderPurchases();
+    else if (scr === "suppliers") renderSuppliers();
+    else renderSaleGrid();
     window.scrollTo(0, 0);
   }
   document.querySelectorAll("nav.tabs button").forEach(function (b) {

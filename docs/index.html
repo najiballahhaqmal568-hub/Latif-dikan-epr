@@ -348,6 +348,35 @@
   .pick-item { display: flex; justify-content: space-between; align-items: center; padding: 13px 12px; border: 1.5px solid var(--line); border-radius: 12px; margin-bottom: 8px; cursor: pointer; background: var(--surface-2); }
   .pick-item b { font-size: 16px; }
   .pick-item small { color: var(--ink-soft); font-size: 13px; }
+
+  /* More menu */
+  .menu-item {
+    display: flex; align-items: center; gap: 14px;
+    background: var(--surface); margin: 10px 14px; padding: 16px 16px;
+    border: 1.5px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); cursor: pointer;
+  }
+  .menu-item .mico { width: 48px; height: 48px; border-radius: 12px; display: grid; place-items: center; font-size: 24px; background: var(--credit-soft); color: var(--credit); flex: 0 0 auto; }
+  .menu-item .mtx { flex: 1 1 auto; }
+  .menu-item .mtx b { font-size: 18px; font-weight: 800; display: block; }
+  .menu-item .mtx small { color: var(--ink-soft); font-size: 13px; }
+  .menu-item .chev { color: var(--ink-soft); font-size: 22px; }
+  .subhead { display: flex; align-items: center; gap: 10px; padding: 12px 14px 4px; }
+  .subhead .back { border: 0; background: var(--surface); border: 1.5px solid var(--line); border-radius: 10px; width: 40px; height: 40px; font-size: 20px; cursor: pointer; color: var(--ink); }
+  .subhead h3 { margin: 0; font-size: 19px; font-weight: 800; }
+
+  /* Expiry warning */
+  .warn-card {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--danger-soft); margin: 8px 14px; padding: 12px 14px;
+    border: 1.5px solid var(--danger); border-radius: 14px;
+  }
+  .warn-card .wi { font-size: 22px; }
+  .warn-card .wtx { flex: 1 1 auto; min-width: 0; }
+  .warn-card .wtx b { font-size: 16.5px; font-weight: 800; display: block; }
+  .warn-card .wtx small { font-size: 13px; color: var(--danger); font-weight: 700; }
+  .warn-card .wbtn { border: 0; background: var(--danger); color: #fff; font: inherit; font-weight: 800; font-size: 13.5px; padding: 10px 12px; border-radius: 10px; cursor: pointer; white-space: nowrap; }
+  .expbadge { display: inline-block; margin-top: 3px; font-size: 11.5px; font-weight: 800; color: var(--danger); }
+  .reason-badge { display: inline-block; font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 20px; background: var(--credit-soft); color: var(--credit); }
 </style>
 
 <div class="app">
@@ -381,6 +410,11 @@
     <section class="screen" id="scr-purchases">
       <div class="listhead">فاکتورهای خرید</div>
       <div class="listwrap" id="purchaseList"></div>
+    </section>
+
+    <!-- More hub screen -->
+    <section class="screen" id="scr-more">
+      <div class="listwrap" id="moreArea"></div>
     </section>
 
     <!-- Debts screen (customers + suppliers) -->
@@ -421,6 +455,7 @@
     <button id="tab-products" data-scr="products"><span class="dico">📦</span>اجناس</button>
     <button id="tab-purchases" data-scr="purchases"><span class="dico">🛒</span>خرید</button>
     <button id="tab-debts" data-scr="debts"><span class="dico">📒</span>قرض‌ها</button>
+    <button id="tab-more" data-scr="more"><span class="dico">☰</span>بیشتر</button>
   </nav>
 </div>
 
@@ -433,7 +468,8 @@
   // ---------- Storage ----------
   var LS_P = "dukan.products.v1", LS_S = "dukan.sales.v1", LS_SEED = "dukan.seeded.v1";
   var LS_SUP = "dukan.suppliers.v1", LS_PUR = "dukan.purchases.v1", LS_CUST = "dukan.customers.v1";
-  var LS_SPAY = "dukan.supPayments.v1", LS_CPAY = "dukan.custPayments.v1";
+  var LS_SPAY = "dukan.supPayments.v1", LS_CPAY = "dukan.custPayments.v1", LS_WASTE = "dukan.waste.v1";
+  var EXPIRY_WARN_DAYS = 14;
   function load(key, def) { try { return JSON.parse(localStorage.getItem(key)) || def; } catch (e) { return def; } }
   function save(key, val) { localStorage.setItem(key, JSON.stringify(val)); }
 
@@ -444,6 +480,7 @@
   var customers = load(LS_CUST, []);
   var supPayments = load(LS_SPAY, []); // رسیدهای پرداخت به تامین‌کننده
   var custPayments = load(LS_CPAY, []); // رسیدهای دریافت از مشتری
+  var waste = load(LS_WASTE, []); // ضایعات
   if (products === null) {
     // نمونه‌های اولیه تا فوری امتحان شود (قابل حذف)
     products = [
@@ -475,6 +512,21 @@
   function $(s) { return document.querySelector(s); }
   function fmtDate(iso) { if (!iso) return ""; var d = new Date(iso); if (isNaN(d)) return iso; var p = function (n) { return (n < 10 ? "0" : "") + n; }; return d.getFullYear() + "/" + p(d.getMonth() + 1) + "/" + p(d.getDate()); }
   function todayISO() { return new Date().toISOString().slice(0, 10); }
+  // روزهای مانده تا تاریخ خرابی (منفی = تیر شده). اگر تاریخ نبود null.
+  function daysToExpiry(expiry) {
+    if (!expiry) return null;
+    var d = new Date(expiry); if (isNaN(d)) return null;
+    var today = new Date(); today.setHours(0, 0, 0, 0);
+    d.setHours(0, 0, 0, 0);
+    return Math.round((d - today) / 86400000);
+  }
+  function expiryLabel(days) {
+    if (days === null) return "";
+    if (days < 0) return "تاریخ تیر شده";
+    if (days === 0) return "امروز تیر می‌شود";
+    return days + " روز تا خرابی";
+  }
+  function reasonLabel(r) { return r === "expired" ? "تاریخ‌تیر" : "خراب"; }
 
   var toastTimer;
   function toast(msg, warn) {
@@ -586,10 +638,13 @@
       var cls = p.type === "weighted" ? "w" : "u";
       var ico = p.type === "weighted" ? "⚖️" : "🧃";
       var low = p.qty <= 0;
+      var dte = daysToExpiry(p.expiry);
+      var expWarn = (dte !== null && dte <= EXPIRY_WARN_DAYS)
+        ? '<span class="expbadge">⏰ ' + expiryLabel(dte) + '</span>' : '';
       return '<div class="prow ' + cls + '">' +
         '<div class="tapzone" data-edit="' + p.id + '" role="button" tabindex="0">' +
           '<div class="ico">' + ico + '</div>' +
-          '<div class="info"><b>' + esc(p.name) + '</b><small>' + (p.type === "weighted" ? "وزنی" : "دانه‌ای") + ' • فروش: ' + money(p.sell) + '</small></div>' +
+          '<div class="info"><b>' + esc(p.name) + '</b><small>' + (p.type === "weighted" ? "وزنی" : "دانه‌ای") + ' • فروش: ' + money(p.sell) + '</small>' + (expWarn ? '<br>' + expWarn : '') + '</div>' +
         '</div>' +
         '<div class="qty"><div class="q num ' + (low ? "low" : "") + '">' + qtyUnit(p.qty, p.unit) + '</div><small>' + (low ? "موجود نیست" : "موجود") + '</small></div>' +
         '<button class="del" data-del="' + p.id + '" aria-label="حذف">🗑</button>' +
@@ -1123,6 +1178,106 @@
     if (debtView === "customers") renderCustomers(); else renderSuppliers();
   }
 
+  // ---------- More hub + Waste (ضایعات) ----------
+  var moreView = null; // null = منو | "waste"
+
+  function renderMore() {
+    var el = $("#moreArea");
+    if (moreView === "waste") { renderWaste(el); return; }
+    el.innerHTML =
+      '<div class="menu-item" data-more="waste">' +
+        '<div class="mico">🗑</div>' +
+        '<div class="mtx"><b>ضایعات و تاریخ خرابی</b><small>ثبت اجناس خراب/تاریخ‌تیر و اخطار خرابی</small></div>' +
+        '<div class="chev">‹</div>' +
+      '</div>';
+  }
+
+  function expiringProducts() {
+    return products.filter(function (p) {
+      var d = daysToExpiry(p.expiry);
+      return d !== null && d <= EXPIRY_WARN_DAYS && p.qty > 0;
+    }).sort(function (a, b) { return daysToExpiry(a.expiry) - daysToExpiry(b.expiry); });
+  }
+
+  function renderWaste(el) {
+    var warnList = expiringProducts();
+    var warnHtml = warnList.length === 0
+      ? '<p style="color:var(--ink-soft);padding:8px 14px;font-size:14px">هیچ جنسی نزدیک خرابی نیست ✓</p>'
+      : warnList.map(function (p) {
+          var d = daysToExpiry(p.expiry);
+          return '<div class="warn-card"><div class="wi">⏰</div>' +
+            '<div class="wtx"><b>' + esc(p.name) + '</b><small>' + expiryLabel(d) + ' • موجود: ' + qtyUnit(p.qty, p.unit) + '</small></div>' +
+            '<button class="wbtn" data-wexp="' + p.id + '">ثبت ضایعات</button></div>';
+        }).join("");
+
+    var totalLoss = 0;
+    waste.forEach(function (w) { totalLoss += w.quantity * w.buyPrice; });
+    var sorted = waste.slice().sort(function (a, b) { return (b.date || "").localeCompare(a.date || ""); });
+    var listHtml = sorted.length === 0
+      ? '<p style="color:var(--ink-soft);text-align:center;padding:10px;font-size:14px">هنوز ضایعاتی ثبت نشده</p>'
+      : sorted.map(function (w) {
+          return '<div class="iline"><div class="in"><b>' + esc(w.productName) + '</b>' +
+            '<small class="num">' + fmtDate(w.date) + ' • <span class="reason-badge">' + reasonLabel(w.reason) + '</span> • ' + qtyUnit(w.quantity, w.unit) + '</small></div>' +
+            '<div class="lt num" style="color:var(--danger)">' + money(w.quantity * w.buyPrice) + '</div></div>';
+        }).join("");
+
+    el.innerHTML =
+      '<div class="subhead"><button class="back" id="wasteBack" aria-label="بازگشت">→</button><h3>ضایعات و تاریخ خرابی</h3></div>' +
+      '<div class="listhead">اخطار تاریخ خرابی (تا ' + EXPIRY_WARN_DAYS + ' روز)</div>' +
+      warnHtml +
+      '<div style="padding:10px 14px 4px"><button class="addline" id="newWasteBtn" style="margin:0">＋ ثبت ضایعات جدید</button></div>' +
+      '<div class="listhead">ضایعات ثبت‌شده — مجموع ضرر: <span style="color:var(--danger)" class="num">' + money(totalLoss) + '</span></div>' +
+      listHtml;
+  }
+
+  function openWastePicker() {
+    if (products.length === 0) { toast("اول از بخش «اجناس» جنس اضافه کنید", true); return; }
+    var list = products.map(function (p) {
+      return '<div class="pick-item" data-wpick="' + p.id + '"><b>' + esc(p.name) + '</b><small class="num">موجود: ' + qtyUnit(p.qty, p.unit) + '</small></div>';
+    }).join("");
+    openSheet('<h2>انتخاب جنس ضایعاتی</h2><div class="pick">' + list + '</div>' +
+      '<div class="actions"><button class="ghost" data-close>لغو</button></div>');
+    sheet.querySelectorAll("[data-wpick]").forEach(function (it) {
+      it.addEventListener("click", function () { var p = findP(it.dataset.wpick); if (p) openWasteForm(p, "spoiled"); });
+    });
+  }
+
+  function openWasteForm(p, defaultReason) {
+    var reason = defaultReason || "spoiled";
+    openSheet(
+      '<h2>ثبت ضایعات: ' + esc(p.name) + '</h2>' +
+      '<p style="margin:-6px 0 12px;color:var(--ink-soft);font-size:14px">موجود: <b class="num">' + qtyUnit(p.qty, p.unit) + '</b> • قیمت خرید: <b class="num">' + money(p.buy) + '</b></p>' +
+      '<div class="field"><label>سبب</label>' +
+        '<div class="seg" id="wReason">' +
+          '<button type="button" data-r="spoiled" class="' + (reason === "spoiled" ? "on" : "") + '">خراب</button>' +
+          '<button type="button" data-r="expired" class="' + (reason === "expired" ? "on" : "") + '">تاریخ‌تیر</button>' +
+        '</div></div>' +
+      '<div class="field"><label>مقدار ضایع‌شده (' + unitLabel(p.unit) + ')</label>' +
+        '<input id="wQty" type="number" inputmode="decimal" step="any" min="0" value="' + p.qty + '" /></div>' +
+      '<div class="actions"><button class="ghost" data-close>لغو</button>' +
+        '<button class="primary danger" id="wOk" style="background:var(--danger)">ثبت ضایعات</button></div>'
+    );
+    sheet.querySelectorAll("#wReason button").forEach(function (b) {
+      b.addEventListener("click", function () {
+        reason = b.dataset.r;
+        sheet.querySelectorAll("#wReason button").forEach(function (x) { x.classList.toggle("on", x === b); });
+      });
+    });
+    $("#wOk").addEventListener("click", function () {
+      var qty = parseFloat($("#wQty").value) || 0;
+      if (qty <= 0) return;
+      recordWaste(p, qty, reason);
+    });
+  }
+
+  function recordWaste(p, qty, reason) {
+    p.qty = +(p.qty - qty).toFixed(3);
+    waste.push({ id: id(), productId: p.id, productName: p.name, unit: p.unit, quantity: qty, buyPrice: p.buy || 0, date: new Date().toISOString(), reason: reason });
+    save(LS_P, products); save(LS_WASTE, waste);
+    closeSheet(); renderMore(); renderProducts(); renderSaleGrid();
+    toast("ضایعات ثبت شد ✓ موجودی کم شد");
+  }
+
   // ---------- Events ----------
   $("#saleGrid").addEventListener("click", function (e) {
     var t = e.target.closest(".tile"); if (t) onTileTap(t.dataset.id);
@@ -1168,6 +1323,12 @@
       renderDebts();
     });
   });
+  $("#moreArea").addEventListener("click", function (e) {
+    var m = e.target.closest("[data-more]"); if (m) { moreView = m.dataset.more; renderMore(); return; }
+    if (e.target.closest("#wasteBack")) { moreView = null; renderMore(); return; }
+    if (e.target.closest("#newWasteBtn")) { openWastePicker(); return; }
+    var w = e.target.closest("[data-wexp]"); if (w) { var p = findP(w.dataset.wexp); if (p) openWasteForm(p, "expired"); }
+  });
 
   $("#search").addEventListener("input", function () {
     $("#searchClr").style.display = this.value ? "block" : "none";
@@ -1181,18 +1342,19 @@
   // Tabs
   function switchTab(scr) {
     currentTab = scr;
-    ["sales", "products", "purchases", "debts"].forEach(function (s) {
+    ["sales", "products", "purchases", "debts", "more"].forEach(function (s) {
       $("#scr-" + s).classList.toggle("active", s === scr);
       $("#tab-" + s).classList.toggle("active", s === scr);
     });
     $("#cartbar").style.display = scr === "sales" ? "block" : "none";
     $("#fab").style.display = scr === "products" ? "flex" : "none";
     $("#fabBuy").style.display = scr === "purchases" ? "flex" : "none";
-    var subs = { sales: "فروش تیز", products: "اجناس و موجودی", purchases: "فاکتور خرید", debts: "دفتر قرض‌ها" };
+    var subs = { sales: "فروش تیز", products: "اجناس و موجودی", purchases: "فاکتور خرید", debts: "دفتر قرض‌ها", more: "بیشتر" };
     $("#hsub").textContent = subs[scr] || "";
     if (scr === "products") renderProducts();
     else if (scr === "purchases") renderPurchases();
     else if (scr === "debts") renderDebts();
+    else if (scr === "more") { moreView = null; renderMore(); }
     else renderSaleGrid();
     window.scrollTo(0, 0);
   }

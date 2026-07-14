@@ -383,10 +383,14 @@
       <div class="listwrap" id="purchaseList"></div>
     </section>
 
-    <!-- Suppliers screen -->
-    <section class="screen" id="scr-suppliers">
-      <div class="listhead">تامین‌کننده‌ها و قرض</div>
-      <div class="listwrap" id="supplierList"></div>
+    <!-- Debts screen (customers + suppliers) -->
+    <section class="screen" id="scr-debts">
+      <div class="seg" id="debtToggle" style="margin:12px 14px 2px">
+        <button type="button" data-d="customers" class="on">👤 مشتری‌ها</button>
+        <button type="button" data-d="suppliers">🤝 تامین‌کننده‌ها</button>
+      </div>
+      <div class="listwrap" id="customerList"></div>
+      <div class="listwrap" id="supplierList" style="display:none"></div>
     </section>
   </main>
 
@@ -416,7 +420,7 @@
     <button class="active" id="tab-sales" data-scr="sales"><span class="dico">🧾</span>فروش</button>
     <button id="tab-products" data-scr="products"><span class="dico">📦</span>اجناس</button>
     <button id="tab-purchases" data-scr="purchases"><span class="dico">🛒</span>خرید</button>
-    <button id="tab-suppliers" data-scr="suppliers"><span class="dico">🤝</span>تامین‌کننده</button>
+    <button id="tab-debts" data-scr="debts"><span class="dico">📒</span>قرض‌ها</button>
   </nav>
 </div>
 
@@ -428,7 +432,7 @@
 (function () {
   // ---------- Storage ----------
   var LS_P = "dukan.products.v1", LS_S = "dukan.sales.v1", LS_SEED = "dukan.seeded.v1";
-  var LS_SUP = "dukan.suppliers.v1", LS_PUR = "dukan.purchases.v1";
+  var LS_SUP = "dukan.suppliers.v1", LS_PUR = "dukan.purchases.v1", LS_CUST = "dukan.customers.v1";
   function load(key, def) { try { return JSON.parse(localStorage.getItem(key)) || def; } catch (e) { return def; } }
   function save(key, val) { localStorage.setItem(key, JSON.stringify(val)); }
 
@@ -436,6 +440,7 @@
   var sales = load(LS_S, []);
   var suppliers = load(LS_SUP, []);
   var purchases = load(LS_PUR, []);
+  var customers = load(LS_CUST, []);
   if (products === null) {
     // نمونه‌های اولیه تا فوری امتحان شود (قابل حذف)
     products = [
@@ -462,6 +467,7 @@
   function qtyUnit(n, u) { return nf.format(n) + " " + unitLabel(u); }
   function findP(pid) { for (var i = 0; i < products.length; i++) if (products[i].id === pid) return products[i]; return null; }
   function findS(sid) { for (var i = 0; i < suppliers.length; i++) if (suppliers[i].id === sid) return suppliers[i]; return null; }
+  function findC(cid) { for (var i = 0; i < customers.length; i++) if (customers[i].id === cid) return customers[i]; return null; }
   function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
   function $(s) { return document.querySelector(s); }
   function fmtDate(iso) { if (!iso) return ""; var d = new Date(iso); if (isNaN(d)) return iso; var p = function (n) { return (n < 10 ? "0" : "") + n; }; return d.getFullYear() + "/" + p(d.getMonth() + 1) + "/" + p(d.getDate()); }
@@ -545,7 +551,18 @@
       return { productId: p.id, productName: p.name, quantity: l.qty, sellPrice: p.sell };
     });
     var total = cartTotal();
-    sales.push({ id: id(), date: new Date().toISOString(), total: total, paymentType: type, customerName: customerName || null, items: items });
+    var nm = (customerName || "").trim();
+    var customerId = null;
+    // فروش قرضی با نام: مشتری یافته/ساخته شود و قرض او زیاد گردد
+    if (type === "credit" && nm) {
+      var cust = null;
+      for (var i = 0; i < customers.length; i++) { if (customers[i].name.trim().toLowerCase() === nm.toLowerCase()) { cust = customers[i]; break; } }
+      if (!cust) { cust = { id: id(), name: nm, phone: "", debt: 0 }; customers.push(cust); }
+      cust.debt = +(cust.debt + total).toFixed(2);
+      customerId = cust.id;
+      save(LS_CUST, customers);
+    }
+    sales.push({ id: id(), date: new Date().toISOString(), total: total, paymentType: type, customerName: nm || null, customerId: customerId, items: items });
     // کم‌کردن موجودی
     cart.forEach(function (l) { var p = findP(l.productId); if (p) p.qty = +(p.qty - l.qty).toFixed(3); });
     save(LS_S, sales); save(LS_P, products);
@@ -1018,6 +1035,73 @@
     setTimeout(function () { $("#payAmt").focus(); }, 60);
   }
 
+  // ---------- Customers (قرض مشتری) ----------
+  function renderCustomers() {
+    var el = $("#customerList");
+    if (customers.length === 0) {
+      el.innerHTML = '<div class="empty"><div class="big">👤</div><p>هنوز مشتری قرضداری نیست.<br>با فروش «قرض» و نوشتن نام مشتری، اینجا ثبت می‌شود.</p></div>';
+      return;
+    }
+    var sorted = customers.slice().sort(function (a, b) { return b.debt - a.debt; });
+    el.innerHTML = sorted.map(function (c) {
+      var low = c.debt > 0;
+      return '<div class="prow w">' +
+        '<div class="tapzone" data-customer="' + c.id + '" role="button" tabindex="0">' +
+          '<div class="ico">👤</div>' +
+          '<div class="info"><b>' + esc(c.name) + '</b><small>' + (c.phone ? esc(c.phone) : "بدون نمبر") + '</small></div>' +
+        '</div>' +
+        '<div class="qty"><div class="q num ' + (low ? "low" : "") + '">' + money(c.debt) + '</div><small>' + (low ? "قرض او" : "تصفیه") + '</small></div>' +
+        '</div>';
+    }).join("");
+  }
+
+  function openCustomerDetail(c) {
+    var theirs = sales.filter(function (s) { return s.paymentType === "credit" && s.customerId === c.id; })
+      .sort(function (a, b) { return (b.date || "").localeCompare(a.date || ""); });
+    var rows = theirs.length === 0 ? '<p style="color:var(--ink-soft);text-align:center;padding:8px">فروش قرضی نیست</p>'
+      : theirs.map(function (sa) {
+          return '<div class="iline"><div class="in"><b class="num">' + fmtDate(sa.date) + '</b><small class="num">' + sa.items.length + ' قلم</small></div><div class="lt num" style="color:var(--danger)">' + money(sa.total) + '</div></div>';
+        }).join("");
+    openSheet(
+      '<h2>' + esc(c.name) + '</h2>' +
+      (c.phone ? '<p style="margin:-6px 0 10px;color:var(--ink-soft)" class="num">' + esc(c.phone) + '</p>' : '') +
+      '<div class="sumbox"><div class="sumrow total"><span>مجموع قرض او به ما</span><span class="rem num">' + money(c.debt) + '</span></div></div>' +
+      (c.debt > 0 ? '<button class="addline" id="cPayBtn" style="border-style:solid;background:var(--primary);color:var(--primary-ink);border-color:var(--primary)">💵 دریافت پرداخت از مشتری</button>' : '') +
+      '<label style="font-size:15px;font-weight:800;color:var(--ink-soft)">فروش‌های قرضی</label>' +
+      '<div style="margin-top:6px">' + rows + '</div>' +
+      '<div class="actions"><button class="primary" data-close>بستن</button></div>'
+    );
+    if (c.debt > 0) $("#cPayBtn").addEventListener("click", function () { openCustomerPay(c); });
+  }
+
+  function openCustomerPay(c) {
+    openSheet(
+      '<h2>دریافت پرداخت از ' + esc(c.name) + '</h2>' +
+      '<p style="margin:-6px 0 12px;color:var(--ink-soft)">قرض فعلی: <b class="num">' + money(c.debt) + '</b></p>' +
+      '<div class="field"><label>مقدار دریافت (افغانی)</label>' +
+        '<input id="cPayAmt" type="number" inputmode="decimal" step="any" min="0" placeholder="0" /></div>' +
+      '<div class="actions"><button class="ghost" data-close>لغو</button>' +
+        '<button class="primary" id="cPayOk">ثبت دریافت</button></div>'
+    );
+    $("#cPayOk").addEventListener("click", function () {
+      var amt = parseFloat($("#cPayAmt").value) || 0;
+      if (amt <= 0) return;
+      c.debt = +Math.max(0, c.debt - amt).toFixed(2);
+      save(LS_CUST, customers);
+      closeSheet(); renderCustomers();
+      toast("دریافت ثبت شد ✓");
+    });
+    setTimeout(function () { $("#cPayAmt").focus(); }, 60);
+  }
+
+  // ---------- Debts hub (مشتری / تامین‌کننده) ----------
+  var debtView = "customers";
+  function renderDebts() {
+    $("#customerList").style.display = debtView === "customers" ? "block" : "none";
+    $("#supplierList").style.display = debtView === "suppliers" ? "block" : "none";
+    if (debtView === "customers") renderCustomers(); else renderSuppliers();
+  }
+
   // ---------- Events ----------
   $("#saleGrid").addEventListener("click", function (e) {
     var t = e.target.closest(".tile"); if (t) onTileTap(t.dataset.id);
@@ -1050,6 +1134,19 @@
   $("#supplierList").addEventListener("keydown", function (e) {
     if (e.key === "Enter" || e.key === " ") { var c = e.target.closest("[data-supplier]"); if (c) { e.preventDefault(); var s = findS(c.dataset.supplier); if (s) openSupplierDetail(s); } }
   });
+  $("#customerList").addEventListener("click", function (e) {
+    var c = e.target.closest("[data-customer]"); if (c) { var cu = findC(c.dataset.customer); if (cu) openCustomerDetail(cu); }
+  });
+  $("#customerList").addEventListener("keydown", function (e) {
+    if (e.key === "Enter" || e.key === " ") { var c = e.target.closest("[data-customer]"); if (c) { e.preventDefault(); var cu = findC(c.dataset.customer); if (cu) openCustomerDetail(cu); } }
+  });
+  document.querySelectorAll("#debtToggle button").forEach(function (b) {
+    b.addEventListener("click", function () {
+      debtView = b.dataset.d;
+      document.querySelectorAll("#debtToggle button").forEach(function (x) { x.classList.toggle("on", x === b); });
+      renderDebts();
+    });
+  });
 
   $("#search").addEventListener("input", function () {
     $("#searchClr").style.display = this.value ? "block" : "none";
@@ -1063,18 +1160,18 @@
   // Tabs
   function switchTab(scr) {
     currentTab = scr;
-    ["sales", "products", "purchases", "suppliers"].forEach(function (s) {
+    ["sales", "products", "purchases", "debts"].forEach(function (s) {
       $("#scr-" + s).classList.toggle("active", s === scr);
       $("#tab-" + s).classList.toggle("active", s === scr);
     });
     $("#cartbar").style.display = scr === "sales" ? "block" : "none";
     $("#fab").style.display = scr === "products" ? "flex" : "none";
     $("#fabBuy").style.display = scr === "purchases" ? "flex" : "none";
-    var subs = { sales: "فروش تیز", products: "اجناس و موجودی", purchases: "فاکتور خرید", suppliers: "قرض تامین‌کننده" };
+    var subs = { sales: "فروش تیز", products: "اجناس و موجودی", purchases: "فاکتور خرید", debts: "دفتر قرض‌ها" };
     $("#hsub").textContent = subs[scr] || "";
     if (scr === "products") renderProducts();
     else if (scr === "purchases") renderPurchases();
-    else if (scr === "suppliers") renderSuppliers();
+    else if (scr === "debts") renderDebts();
     else renderSaleGrid();
     window.scrollTo(0, 0);
   }

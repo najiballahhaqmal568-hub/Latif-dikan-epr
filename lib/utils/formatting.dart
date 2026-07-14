@@ -39,3 +39,26 @@ String unitLabel(String unit) {
 String formatQuantityWithUnit(num qty, String unit) {
   return '${formatQuantity(qty)} ${unitLabel(unit)}';
 }
+
+/// چند روز تا تاریخ خرابی مانده (منفی = تیر شده). اگر تاریخ نبود null.
+int? daysToExpiry(String? expiryIso) {
+  if (expiryIso == null || expiryIso.isEmpty) return null;
+  final d = DateTime.tryParse(expiryIso);
+  if (d == null) return null;
+  final today = DateTime.now();
+  final a = DateTime(d.year, d.month, d.day);
+  final b = DateTime(today.year, today.month, today.day);
+  return a.difference(b).inDays;
+}
+
+/// برچسب دری وضعیت خرابی از روی روزهای مانده.
+String expiryLabel(int days) {
+  if (days < 0) return 'تاریخ تیر شده';
+  if (days == 0) return 'امروز تیر می‌شود';
+  return '$days روز تا خرابی';
+}
+
+/// سبب ضایعات به دری.
+String wasteReasonLabel(String reason) {
+  return reason == 'expired' ? 'تاریخ‌تیر' : 'خراب';
+}

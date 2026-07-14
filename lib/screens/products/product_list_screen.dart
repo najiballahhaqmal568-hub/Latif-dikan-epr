@@ -128,6 +128,8 @@ class _ProductRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final lowStock = product.quantity <= 0;
+    final expDays = daysToExpiry(product.expiryDate);
+    final showExpiry = expDays != null && expDays <= 14;
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       onTap: onTap,
@@ -137,9 +139,25 @@ class _ProductRow extends StatelessWidget {
       ),
       subtitle: Padding(
         padding: const EdgeInsets.only(top: 4),
-        child: Text(
-          '${product.type.label} • فروش: ${formatAfghani(product.sellPrice)}',
-          style: const TextStyle(fontSize: 15),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '${product.type.label} • فروش: ${formatAfghani(product.sellPrice)}',
+              style: const TextStyle(fontSize: 15),
+            ),
+            if (showExpiry)
+              Padding(
+                padding: const EdgeInsets.only(top: 3),
+                child: Text(
+                  '⏰ ${expiryLabel(expDays)}',
+                  style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.bold,
+                      color: AppTheme.danger),
+                ),
+              ),
+          ],
         ),
       ),
       leading: CircleAvatar(

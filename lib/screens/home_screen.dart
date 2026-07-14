@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
 import 'debts/debts_screen.dart';
+import 'more/more_screen.dart';
 import 'products/product_list_screen.dart';
 import 'purchases/purchases_screen.dart';
 import 'sales/sales_screen.dart';
@@ -25,8 +26,10 @@ class _HomeScreenState extends State<HomeScreen> {
         return const ProductListScreen();
       case 2:
         return const PurchasesScreen();
-      default:
+      case 3:
         return const DebtsScreen();
+      default:
+        return const MoreScreen();
     }
   }
 
@@ -61,6 +64,11 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: Icon(Icons.menu_book_outlined),
             selectedIcon: Icon(Icons.menu_book, color: AppTheme.primary),
             label: 'قرض‌ها',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.more_horiz),
+            selectedIcon: Icon(Icons.more_horiz, color: AppTheme.primary),
+            label: 'بیشتر',
           ),
         ],
       ),

@@ -9,7 +9,7 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._();
 
   static const String _dbName = 'dukan_latif.db';
-  static const int _dbVersion = 4;
+  static const int _dbVersion = 5;
 
   Database? _db;
 
@@ -79,6 +79,23 @@ class DatabaseHelper {
     await _createPurchaseTables(db);
     await _createCustomerTable(db);
     await _createPaymentTables(db);
+    await _createWasteTable(db);
+  }
+
+  /// جدول ضایعات (مرحله پنجم — اجناس خراب/تاریخ‌تیر).
+  Future<void> _createWasteTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE waste (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_id INTEGER NOT NULL,
+        product_name TEXT NOT NULL,
+        unit TEXT NOT NULL,
+        quantity REAL NOT NULL,
+        buy_price REAL NOT NULL,
+        date TEXT NOT NULL,
+        reason TEXT NOT NULL
+      )
+    ''');
   }
 
   /// جدول مشتری‌ها (مرحله سوم — دفتر قرض مشتری).
@@ -163,6 +180,9 @@ class DatabaseHelper {
     }
     if (oldVersion < 4) {
       await _createPaymentTables(db);
+    }
+    if (oldVersion < 5) {
+      await _createWasteTable(db);
     }
   }
 

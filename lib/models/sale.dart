@@ -52,7 +52,7 @@ class Sale {
   }
 }
 
-/// قلم فروش (sale_items) — با اسنپ‌شات نام و قیمت.
+/// قلم فروش (sale_items) — با اسنپ‌شات نام، قیمت فروش و قیمت خرید لحظهٔ فروش.
 class SaleItem {
   final int? id;
   final int? saleId;
@@ -60,6 +60,7 @@ class SaleItem {
   final String productName;
   final double quantity;
   final double sellPrice;
+  final double? buyPrice; // قیمت خرید لحظهٔ فروش (فروش‌های قدیمی تهی)
 
   const SaleItem({
     this.id,
@@ -68,6 +69,7 @@ class SaleItem {
     required this.productName,
     required this.quantity,
     required this.sellPrice,
+    this.buyPrice,
   });
 
   double get lineTotal => quantity * sellPrice;
@@ -80,6 +82,7 @@ class SaleItem {
       'product_name': productName,
       'quantity': quantity,
       'sell_price': sellPrice,
+      'buy_price': buyPrice,
     };
   }
 
@@ -91,6 +94,7 @@ class SaleItem {
       productName: map['product_name'] as String,
       quantity: (map['quantity'] as num).toDouble(),
       sellPrice: (map['sell_price'] as num).toDouble(),
+      buyPrice: (map['buy_price'] as num?)?.toDouble(),
     );
   }
 }

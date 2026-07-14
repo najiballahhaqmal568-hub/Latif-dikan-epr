@@ -70,6 +70,7 @@ class SaleRepository {
           'product_name': item.product.name,
           'quantity': item.quantity,
           'sell_price': item.sellPrice,
+          'buy_price': item.product.buyPrice, // اسنپ‌شات قیمت خرید لحظهٔ فروش
         });
 
         // کم‌کردن موجودی

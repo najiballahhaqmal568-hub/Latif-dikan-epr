@@ -86,7 +86,7 @@ class ReportRepository {
         [start]);
 
     final cogs = await _scalar(
-        'SELECT COALESCE(SUM(si.quantity * COALESCE(p.buy_price,0)),0) '
+        'SELECT COALESCE(SUM(si.quantity * COALESCE(si.buy_price, p.buy_price, 0)),0) '
         'FROM sale_items si JOIN sales s ON s.id = si.sale_id '
         'LEFT JOIN products p ON p.id = si.product_id WHERE s.date >= ?',
         [start]);
@@ -106,7 +106,7 @@ class ReportRepository {
       'SELECT si.product_name AS name, '
       'SUM(si.quantity) AS qty, '
       'SUM(si.quantity * si.sell_price) AS sales, '
-      'SUM(si.quantity * (si.sell_price - COALESCE(p.buy_price,0))) AS profit '
+      'SUM(si.quantity * (si.sell_price - COALESCE(si.buy_price, p.buy_price, 0))) AS profit '
       'FROM sale_items si JOIN sales s ON s.id = si.sale_id '
       'LEFT JOIN products p ON p.id = si.product_id '
       'WHERE s.date >= ? '

@@ -9,7 +9,7 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._();
 
   static const String _dbName = 'dukan_latif.db';
-  static const int _dbVersion = 7;
+  static const int _dbVersion = 8;
 
   Database? _db;
 
@@ -68,6 +68,7 @@ class DatabaseHelper {
         product_name TEXT NOT NULL,
         quantity REAL NOT NULL,
         sell_price REAL NOT NULL,
+        buy_price REAL,
         FOREIGN KEY (sale_id) REFERENCES sales (id) ON DELETE CASCADE
       )
     ''');
@@ -204,6 +205,10 @@ class DatabaseHelper {
     } else if (oldVersion == 6) {
       // دیتابیس v6 جدول expenses را بدون correction_of دارد؛ ستون را اضافه کن.
       await db.execute('ALTER TABLE expenses ADD COLUMN correction_of INTEGER');
+    }
+    if (oldVersion < 8) {
+      // sale_items فقط در onCreate ساخته می‌شود؛ برای همهٔ نسخه‌های قدیمی ستون را اضافه کن.
+      await db.execute('ALTER TABLE sale_items ADD COLUMN buy_price REAL');
     }
   }
 

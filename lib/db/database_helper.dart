@@ -9,7 +9,7 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._();
 
   static const String _dbName = 'dukan_latif.db';
-  static const int _dbVersion = 1;
+  static const int _dbVersion = 2;
 
   Database? _db;
 
@@ -29,6 +29,7 @@ class DatabaseHelper {
         await db.execute('PRAGMA foreign_keys = ON');
       },
       onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
     );
   }
 
@@ -73,6 +74,54 @@ class DatabaseHelper {
     await db.execute(
       'CREATE INDEX idx_sale_items_sale ON sale_items (sale_id)',
     );
+
+    await _createPurchaseTables(db);
+  }
+
+  /// جدول‌های مرحله دوم: تامین‌کننده، فاکتور خرید و قلم‌های آن.
+  Future<void> _createPurchaseTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE suppliers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        phone TEXT,
+        debt REAL NOT NULL DEFAULT 0
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE purchases (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        supplier_id INTEGER,
+        supplier_name TEXT NOT NULL,
+        date TEXT NOT NULL,
+        total REAL NOT NULL DEFAULT 0,
+        paid REAL NOT NULL DEFAULT 0,
+        remaining REAL NOT NULL DEFAULT 0
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE purchase_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        purchase_id INTEGER NOT NULL,
+        product_id INTEGER NOT NULL,
+        product_name TEXT NOT NULL,
+        quantity REAL NOT NULL,
+        buy_price REAL NOT NULL,
+        FOREIGN KEY (purchase_id) REFERENCES purchases (id) ON DELETE CASCADE
+      )
+    ''');
+
+    await db.execute(
+      'CREATE INDEX idx_purchase_items_purchase ON purchase_items (purchase_id)',
+    );
+  }
+
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await _createPurchaseTables(db);
+    }
   }
 
   /// بستن دیتابیس (بیشتر برای تست).

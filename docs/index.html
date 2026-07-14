@@ -433,6 +433,7 @@
   // ---------- Storage ----------
   var LS_P = "dukan.products.v1", LS_S = "dukan.sales.v1", LS_SEED = "dukan.seeded.v1";
   var LS_SUP = "dukan.suppliers.v1", LS_PUR = "dukan.purchases.v1", LS_CUST = "dukan.customers.v1";
+  var LS_SPAY = "dukan.supPayments.v1", LS_CPAY = "dukan.custPayments.v1";
   function load(key, def) { try { return JSON.parse(localStorage.getItem(key)) || def; } catch (e) { return def; } }
   function save(key, val) { localStorage.setItem(key, JSON.stringify(val)); }
 
@@ -441,6 +442,8 @@
   var suppliers = load(LS_SUP, []);
   var purchases = load(LS_PUR, []);
   var customers = load(LS_CUST, []);
+  var supPayments = load(LS_SPAY, []); // رسیدهای پرداخت به تامین‌کننده
+  var custPayments = load(LS_CPAY, []); // رسیدهای دریافت از مشتری
   if (products === null) {
     // نمونه‌های اولیه تا فوری امتحان شود (قابل حذف)
     products = [
@@ -1008,11 +1011,23 @@
       (s.phone ? '<p style="margin:-6px 0 10px;color:var(--ink-soft)" class="num">' + esc(s.phone) + '</p>' : '') +
       '<div class="sumbox"><div class="sumrow total"><span>مجموع قرض ما</span><span class="rem num">' + money(s.debt) + '</span></div></div>' +
       (s.debt > 0 ? '<button class="addline" id="payBtn" style="border-style:solid;background:var(--primary);color:var(--primary-ink);border-color:var(--primary)">💵 پرداخت به تامین‌کننده</button>' : '') +
+      '<label style="font-size:15px;font-weight:800;color:var(--ink-soft)">رسیدهای پرداخت</label>' +
+      '<div style="margin-top:6px">' + payReceiptRows(supPayments, "supplierId", s.id) + '</div>' +
       '<label style="font-size:15px;font-weight:800;color:var(--ink-soft)">فاکتورها</label>' +
       '<div style="margin-top:6px">' + rows + '</div>' +
       '<div class="actions"><button class="primary" data-close>بستن</button></div>'
     );
     if (s.debt > 0) $("#payBtn").addEventListener("click", function () { openPayDialog(s); });
+  }
+
+  // سطرهای رسید پرداخت/دریافت (تاریخ + مبلغ)
+  function payReceiptRows(list, key, refId) {
+    var mine = list.filter(function (x) { return x[key] === refId; })
+      .sort(function (a, b) { return (b.date || "").localeCompare(a.date || ""); });
+    if (mine.length === 0) return '<p style="color:var(--ink-soft);text-align:center;padding:8px">رسیدی ثبت نشده</p>';
+    return mine.map(function (r) {
+      return '<div class="iline"><div class="in"><b class="num">' + fmtDate(r.date) + '</b><small>رسید</small></div><div class="lt num" style="color:var(--primary)">' + money(r.amount) + '</div></div>';
+    }).join("");
   }
 
   function openPayDialog(s) {
@@ -1028,9 +1043,11 @@
       var amt = parseFloat($("#payAmt").value) || 0;
       if (amt <= 0) return;
       s.debt = +Math.max(0, s.debt - amt).toFixed(2);
-      save(LS_SUP, suppliers);
-      closeSheet(); renderSuppliers();
-      toast("پرداخت ثبت شد ✓");
+      supPayments.push({ id: id(), supplierId: s.id, date: new Date().toISOString(), amount: amt });
+      save(LS_SUP, suppliers); save(LS_SPAY, supPayments);
+      renderSuppliers();
+      openSupplierDetail(s); // بازکردن دوباره تا رسید جدید دیده شود
+      toast("رسید پرداخت ثبت شد ✓");
     });
     setTimeout(function () { $("#payAmt").focus(); }, 60);
   }
@@ -1067,6 +1084,8 @@
       (c.phone ? '<p style="margin:-6px 0 10px;color:var(--ink-soft)" class="num">' + esc(c.phone) + '</p>' : '') +
       '<div class="sumbox"><div class="sumrow total"><span>مجموع قرض او به ما</span><span class="rem num">' + money(c.debt) + '</span></div></div>' +
       (c.debt > 0 ? '<button class="addline" id="cPayBtn" style="border-style:solid;background:var(--primary);color:var(--primary-ink);border-color:var(--primary)">💵 دریافت پرداخت از مشتری</button>' : '') +
+      '<label style="font-size:15px;font-weight:800;color:var(--ink-soft)">رسیدهای دریافت</label>' +
+      '<div style="margin-top:6px">' + payReceiptRows(custPayments, "customerId", c.id) + '</div>' +
       '<label style="font-size:15px;font-weight:800;color:var(--ink-soft)">فروش‌های قرضی</label>' +
       '<div style="margin-top:6px">' + rows + '</div>' +
       '<div class="actions"><button class="primary" data-close>بستن</button></div>'
@@ -1087,9 +1106,11 @@
       var amt = parseFloat($("#cPayAmt").value) || 0;
       if (amt <= 0) return;
       c.debt = +Math.max(0, c.debt - amt).toFixed(2);
-      save(LS_CUST, customers);
-      closeSheet(); renderCustomers();
-      toast("دریافت ثبت شد ✓");
+      custPayments.push({ id: id(), customerId: c.id, date: new Date().toISOString(), amount: amt });
+      save(LS_CUST, customers); save(LS_CPAY, custPayments);
+      renderCustomers();
+      openCustomerDetail(c); // بازکردن دوباره تا رسید جدید دیده شود
+      toast("رسید دریافت ثبت شد ✓");
     });
     setTimeout(function () { $("#cPayAmt").focus(); }, 60);
   }

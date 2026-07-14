@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../theme/app_theme.dart';
+import '../expenses/expenses_screen.dart';
 import '../waste/waste_screen.dart';
 
 /// صفحه «بیشتر» — منوی بخش‌های کم‌کاربردتر (مقیاس‌پذیر برای بخش‌های آینده).
@@ -20,6 +21,14 @@ class MoreScreen extends StatelessWidget {
             subtitle: 'ثبت اجناس خراب/تاریخ‌تیر و اخطار خرابی',
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const WasteScreen()),
+            ),
+          ),
+          _MenuItem(
+            icon: Icons.home_outlined,
+            title: 'مصارف خانه',
+            subtitle: 'پیسه‌ای که از دوکان برای خرچ خانه کشیده می‌شود',
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const ExpensesScreen()),
             ),
           ),
         ],

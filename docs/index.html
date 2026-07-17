@@ -468,7 +468,7 @@
   // ---------- Storage ----------
   var LS_P = "dukan.products.v1", LS_S = "dukan.sales.v1", LS_SEED = "dukan.seeded.v1";
   var LS_SUP = "dukan.suppliers.v1", LS_PUR = "dukan.purchases.v1", LS_CUST = "dukan.customers.v1";
-  var LS_SPAY = "dukan.supPayments.v1", LS_CPAY = "dukan.custPayments.v1", LS_WASTE = "dukan.waste.v1", LS_EXP = "dukan.expenses.v1";
+  var LS_SPAY = "dukan.supPayments.v1", LS_CPAY = "dukan.custPayments.v1", LS_WASTE = "dukan.waste.v1", LS_EXP = "dukan.expenses.v1", LS_COUNTS = "dukan.stockCounts.v1";
   var EXPIRY_WARN_DAYS = 14;
   var WIFI_LOW_GB = 20;
   function load(key, def) { try { return JSON.parse(localStorage.getItem(key)) || def; } catch (e) { return def; } }
@@ -483,6 +483,7 @@
   var custPayments = load(LS_CPAY, []); // رسیدهای دریافت از مشتری
   var waste = load(LS_WASTE, []); // ضایعات
   var expenses = load(LS_EXP, []); // مصارف خانه
+  var stockCounts = load(LS_COUNTS, []); // شمارش ماهانه (فرق‌ها)
   if (products === null) {
     // نمونه‌های اولیه تا فوری امتحان شود (قابل حذف)
     products = [
@@ -514,6 +515,7 @@
   function $(s) { return document.querySelector(s); }
   function fmtDate(iso) { if (!iso) return ""; var d = new Date(iso); if (isNaN(d)) return iso; var p = function (n) { return (n < 10 ? "0" : "") + n; }; return d.getFullYear() + "/" + p(d.getMonth() + 1) + "/" + p(d.getDate()); }
   function todayISO() { return new Date().toISOString().slice(0, 10); }
+  function monthKey() { var d = new Date(); var m = d.getMonth() + 1; return d.getFullYear() + "/" + (m < 10 ? "0" + m : m); }
   // روزهای مانده تا تاریخ خرابی (منفی = تیر شده). اگر تاریخ نبود null.
   function daysToExpiry(expiry) {
     if (!expiry) return null;
@@ -1197,6 +1199,7 @@
     if (moreView === "expenses") { renderExpenses(el); return; }
     if (moreView === "reports") { renderReports(el); return; }
     if (moreView === "wifi") { renderWifi(el); return; }
+    if (moreView === "count") { renderCount(el); return; }
     el.innerHTML =
       '<div class="menu-item" data-more="reports">' +
         '<div class="mico" style="background:var(--primary-soft);color:var(--primary)">📊</div>' +
@@ -1206,6 +1209,11 @@
       '<div class="menu-item" data-more="wifi">' +
         '<div class="mico" style="background:var(--primary-soft);color:var(--primary)">📶</div>' +
         '<div class="mtx"><b>وای‌فای</b><small>جی‌بی مانده، تاریخ ختم و اخطارها</small></div>' +
+        '<div class="chev">‹</div>' +
+      '</div>' +
+      '<div class="menu-item" data-more="count">' +
+        '<div class="mico">🔢</div>' +
+        '<div class="mtx"><b>شمارش ماهانه</b><small>مقایسهٔ موجودی با شمارش واقعی و دیدن فرق</small></div>' +
         '<div class="chev">‹</div>' +
       '</div>' +
       '<div class="menu-item" data-more="waste">' +
@@ -1297,6 +1305,64 @@
       '</div>' +
       '<div class="listhead">فایده هر جنس (' + (reportPeriod === "today" ? "امروز" : reportPeriod === "month" ? "این ماه" : "همه") + ')</div>' +
       prodHtml;
+  }
+
+  // ---------- Monthly stock count (شمارش ماهانه) ----------
+  function renderCount(el) {
+    var head = '<div class="subhead"><button class="back moreBack" aria-label="بازگشت">→</button><h3>شمارش ماهانه</h3></div>';
+    if (products.length === 0) {
+      el.innerHTML = head + '<div class="empty"><div class="big">🔢</div><p>هنوز جنسی نیست.</p></div>';
+      return;
+    }
+    var rows = products.slice().sort(function (a, b) { return a.name.localeCompare(b.name, "fa"); }).map(function (p) {
+      return '<div class="iline">' +
+        '<div class="in"><b>' + esc(p.name) + '</b><small class="num">باید باشد: ' + qtyUnit(p.qty, p.unit) + '</small></div>' +
+        '<div style="display:flex;align-items:center;gap:8px">' +
+          '<input class="cntinp" data-cnt="' + p.id + '" type="number" inputmode="decimal" step="any" min="0" value="' + p.qty + '" style="width:74px;direction:ltr;text-align:right;border:1.5px solid var(--line);background:var(--surface);color:var(--ink);border-radius:9px;padding:8px;font:inherit;font-size:15px;outline:0" />' +
+          '<span class="num" data-cntdiff="' + p.id + '" style="min-width:56px;text-align:left;font-weight:800;color:var(--ink-soft)">۰</span>' +
+        '</div>' +
+        '</div>';
+    }).join("");
+
+    var recorded = stockCounts.slice().sort(function (a, b) { return (b.date || "").localeCompare(a.date || ""); });
+    var recHtml = recorded.length === 0
+      ? '<p style="color:var(--ink-soft);text-align:center;padding:10px;font-size:14px">هنوز شمارشی ثبت نشده</p>'
+      : recorded.map(function (c) {
+          var col = c.difference < 0 ? "var(--danger)" : "var(--primary)";
+          var lbl = c.difference < 0 ? "کسر" : "زیادت";
+          return '<div class="iline"><div class="in"><b>' + esc(c.productName) + '</b><small class="num">ماه ' + c.month + ' • شمرده: ' + nf.format(c.counted) + ' / باید: ' + nf.format(c.calculated) + '</small></div>' +
+            '<div class="lt num" style="color:' + col + '">' + lbl + ' ' + nf.format(Math.abs(c.difference)) + '</div></div>';
+        }).join("");
+
+    el.innerHTML = head +
+      '<div class="listhead">شمارش ماه ' + monthKey() + ' — تعداد واقعی را بنویسید</div>' +
+      rows +
+      '<div style="padding:12px 14px 4px"><button class="addline" id="saveCountBtn" style="margin:0">💾 ثبت شمارش ماه</button></div>' +
+      '<div class="listhead">فرق‌های ثبت‌شده</div>' +
+      recHtml;
+  }
+
+  function saveCount() {
+    var mk = monthKey();
+    var changed = 0, diffs = 0;
+    // حذف رکوردهای همین ماه (جایگزینی)
+    stockCounts = stockCounts.filter(function (c) { return c.month !== mk; });
+    products.forEach(function (p) {
+      var inp = document.querySelector('[data-cnt="' + p.id + '"]');
+      if (!inp) return;
+      var counted = parseFloat(inp.value);
+      if (isNaN(counted)) return;
+      var calc = p.qty;
+      var diff = +(counted - calc).toFixed(3);
+      if (diff !== 0) {
+        stockCounts.push({ id: id(), month: mk, productId: p.id, productName: p.name, unit: p.unit, calculated: calc, counted: counted, difference: diff, date: new Date().toISOString() });
+        diffs++;
+      }
+      if (counted !== calc) { p.qty = counted; changed++; } // اصلاح موجودی به تعداد شمرده‌شده
+    });
+    save(LS_COUNTS, stockCounts); save(LS_P, products);
+    renderMore(); renderProducts(); renderSaleGrid();
+    toast(diffs === 0 ? "شمارش ثبت شد — هیچ فرقی نبود ✓" : ("شمارش ثبت شد — " + diffs + " قلم فرق داشت"));
   }
 
   // ---------- WiFi (وای‌فای) ----------
@@ -1558,7 +1624,21 @@
     if (e.target.closest("#newExpenseBtn")) { openExpenseForm(); return; }
     var cor = e.target.closest("[data-correct]"); if (cor) { var ex = null; for (var i = 0; i < expenses.length; i++) if (expenses[i].id === cor.dataset.correct) ex = expenses[i]; if (ex) openCorrectionForm(ex); return; }
     var rp = e.target.closest("[data-rp]"); if (rp) { reportPeriod = rp.dataset.rp; renderMore(); return; }
-    var ww = e.target.closest("[data-wifiwaste]"); if (ww) { var wp = findP(ww.dataset.wifiwaste); if (wp && wp.qty > 0) recordWaste(wp, wp.qty, "expired"); }
+    var ww = e.target.closest("[data-wifiwaste]"); if (ww) { var wp = findP(ww.dataset.wifiwaste); if (wp && wp.qty > 0) recordWaste(wp, wp.qty, "expired"); return; }
+    if (e.target.closest("#saveCountBtn")) { saveCount(); }
+  });
+  $("#moreArea").addEventListener("input", function (e) {
+    var ci = e.target.closest("[data-cnt]");
+    if (ci) {
+      var p = findP(ci.dataset.cnt); if (!p) return;
+      var counted = parseFloat(ci.value);
+      var span = document.querySelector('[data-cntdiff="' + p.id + '"]');
+      if (!span) return;
+      if (isNaN(counted)) { span.textContent = "۰"; span.style.color = "var(--ink-soft)"; return; }
+      var diff = +(counted - p.qty).toFixed(3);
+      span.textContent = (diff > 0 ? "+" : "") + nf.format(diff);
+      span.style.color = diff < 0 ? "var(--danger)" : (diff > 0 ? "var(--primary)" : "var(--ink-soft)");
+    }
   });
 
   $("#search").addEventListener("input", function () {

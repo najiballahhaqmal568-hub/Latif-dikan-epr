@@ -9,7 +9,7 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._();
 
   static const String _dbName = 'dukan_latif.db';
-  static const int _dbVersion = 8;
+  static const int _dbVersion = 9;
 
   Database? _db;
 
@@ -82,6 +82,24 @@ class DatabaseHelper {
     await _createPaymentTables(db);
     await _createWasteTable(db);
     await _createExpenseTable(db);
+    await _createStockCountTable(db);
+  }
+
+  /// جدول شمارش ماهانه (مرحله هفتم — فرق موجودی).
+  Future<void> _createStockCountTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE stock_counts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        month TEXT NOT NULL,
+        product_id INTEGER NOT NULL,
+        product_name TEXT NOT NULL,
+        unit TEXT NOT NULL,
+        calculated REAL NOT NULL,
+        counted REAL NOT NULL,
+        difference REAL NOT NULL,
+        date TEXT NOT NULL
+      )
+    ''');
   }
 
   /// جدول مصارف خانه (مرحله ششم).
@@ -209,6 +227,9 @@ class DatabaseHelper {
     if (oldVersion < 8) {
       // sale_items فقط در onCreate ساخته می‌شود؛ برای همهٔ نسخه‌های قدیمی ستون را اضافه کن.
       await db.execute('ALTER TABLE sale_items ADD COLUMN buy_price REAL');
+    }
+    if (oldVersion < 9) {
+      await _createStockCountTable(db);
     }
   }
 

@@ -4,6 +4,7 @@ import '../../theme/app_theme.dart';
 import '../expenses/expenses_screen.dart';
 import '../reports/reports_screen.dart';
 import '../waste/waste_screen.dart';
+import '../wifi/wifi_screen.dart';
 
 /// صفحه «بیشتر» — منوی بخش‌های کم‌کاربردتر (مقیاس‌پذیر برای بخش‌های آینده).
 class MoreScreen extends StatelessWidget {
@@ -22,6 +23,14 @@ class MoreScreen extends StatelessWidget {
             subtitle: 'فروش، فایده، ضایعات، مصارف و قرض‌ها',
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const ReportsScreen()),
+            ),
+          ),
+          _MenuItem(
+            icon: Icons.wifi,
+            title: 'وای‌فای',
+            subtitle: 'جی‌بی مانده، تاریخ ختم و اخطارها',
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const WifiScreen()),
             ),
           ),
           _MenuItem(

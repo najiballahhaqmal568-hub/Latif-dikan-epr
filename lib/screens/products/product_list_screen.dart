@@ -162,10 +162,15 @@ class _ProductRow extends StatelessWidget {
       ),
       leading: CircleAvatar(
         radius: 26,
-        backgroundColor:
-            product.isWeighted ? AppTheme.primary : AppTheme.credit,
+        backgroundColor: product.type == ProductType.unit
+            ? AppTheme.credit
+            : AppTheme.primary,
         child: Icon(
-          product.isWeighted ? Icons.scale : Icons.inventory_2,
+          product.type == ProductType.wifi
+              ? Icons.wifi
+              : (product.type == ProductType.weighted
+                  ? Icons.scale
+                  : Icons.inventory_2),
           color: Colors.white,
         ),
       ),

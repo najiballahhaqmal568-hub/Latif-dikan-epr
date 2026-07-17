@@ -18,7 +18,13 @@ class ProductTileButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final outOfStock = product.quantity <= 0;
-    final color = product.isWeighted ? AppTheme.primary : AppTheme.credit;
+    final isUnit = product.type == ProductType.unit;
+    final color = isUnit ? AppTheme.credit : AppTheme.primary;
+    final icon = product.type == ProductType.wifi
+        ? Icons.wifi
+        : (product.type == ProductType.weighted
+            ? Icons.scale
+            : Icons.inventory_2);
 
     return Material(
       color: Colors.white,
@@ -37,7 +43,7 @@ class ProductTileButton extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(
-                product.isWeighted ? Icons.scale : Icons.inventory_2,
+                icon,
                 color: color,
                 size: 26,
               ),

@@ -1,7 +1,8 @@
-/// نوع جنس: وزنی (کیلویی) یا دانه‌ای (ثابت).
+/// نوع جنس: وزنی (کیلویی)، دانه‌ای (ثابت)، یا وای‌فای (جی‌بی).
 enum ProductType {
   weighted, // وزنی — مقدار موقع فروش پرسیده می‌شود
-  unit; // دانه‌ای — یک ضربه = یک دانه
+  unit, // دانه‌ای — یک ضربه = یک دانه
+  wifi; // وای‌فای — واحد جی‌بی، مثل وزنی فروخته می‌شود
 
   String get dbValue => name;
 
@@ -12,10 +13,32 @@ enum ProductType {
     );
   }
 
-  String get label => this == ProductType.weighted ? 'وزنی' : 'دانه‌ای';
+  String get label {
+    switch (this) {
+      case ProductType.weighted:
+        return 'وزنی';
+      case ProductType.wifi:
+        return 'وای‌فای';
+      case ProductType.unit:
+        return 'دانه‌ای';
+    }
+  }
 
   /// واحد پیش‌فرض این نوع.
-  String get defaultUnit => this == ProductType.weighted ? 'kg' : 'piece';
+  String get defaultUnit {
+    switch (this) {
+      case ProductType.weighted:
+        return 'kg';
+      case ProductType.wifi:
+        return 'gb';
+      case ProductType.unit:
+        return 'piece';
+    }
+  }
+
+  /// آیا موقع فروش مقدار پرسیده می‌شود (وزنی و وای‌فای).
+  bool get asksQuantity =>
+      this == ProductType.weighted || this == ProductType.wifi;
 }
 
 /// مدل جنس (products).

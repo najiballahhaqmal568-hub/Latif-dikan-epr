@@ -170,34 +170,45 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                   label: Text('دانه‌ای'),
                   icon: Icon(Icons.inventory_2),
                 ),
+                ButtonSegment(
+                  value: ProductType.wifi,
+                  label: Text('وای‌فای'),
+                  icon: Icon(Icons.wifi),
+                ),
               ],
               selected: {_type},
               onSelectionChanged: (s) => _onTypeChanged(s.first),
             ),
-            const SizedBox(height: 20),
-            const Text(
-              'واحد',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            SegmentedButton<String>(
-              segments: const [
-                ButtonSegment(value: 'kg', label: Text('کیلو')),
-                ButtonSegment(value: 'piece', label: Text('دانه')),
-              ],
-              selected: {_unit == 'gb' ? 'kg' : _unit},
-              onSelectionChanged: (s) => setState(() => _unit = s.first),
-            ),
+            if (_type != ProductType.wifi) ...[
+              const SizedBox(height: 20),
+              const Text(
+                'واحد',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              SegmentedButton<String>(
+                segments: const [
+                  ButtonSegment(value: 'kg', label: Text('کیلو')),
+                  ButtonSegment(value: 'piece', label: Text('دانه')),
+                ],
+                selected: {_unit == 'gb' ? 'kg' : _unit},
+                onSelectionChanged: (s) => setState(() => _unit = s.first),
+              ),
+            ],
             const SizedBox(height: 20),
             _NumberField(
               controller: _buyPriceController,
-              label: 'قیمت خرید (افغانی)',
+              label: _type == ProductType.wifi
+                  ? 'قیمت خرید فی جی‌بی (افغانی)'
+                  : 'قیمت خرید (افغانی)',
               icon: Icons.shopping_cart_outlined,
             ),
             const SizedBox(height: 16),
             _NumberField(
               controller: _sellPriceController,
-              label: 'قیمت فروش (افغانی)',
+              label: _type == ProductType.wifi
+                  ? 'قیمت فروش فی جی‌بی (افغانی)'
+                  : 'قیمت فروش (افغانی)',
               icon: Icons.sell_outlined,
               validator: (v) {
                 if (v == null || v.trim().isEmpty) {
@@ -214,12 +225,17 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
               controller: _quantityController,
               label: _type == ProductType.weighted
                   ? 'مقدار موجود (کیلو)'
-                  : 'تعداد موجود (دانه)',
+                  : (_type == ProductType.wifi
+                      ? 'مقدار (جی‌بی)'
+                      : 'تعداد موجود (دانه)'),
               icon: Icons.numbers,
             ),
             const SizedBox(height: 20),
             _ExpiryField(
               date: _expiryDate,
+              emptyLabel: _type == ProductType.wifi
+                  ? 'تاریخ ختم'
+                  : 'تاریخ خرابی (اختیاری)',
               onPick: _pickExpiryDate,
               onClear: () => setState(() => _expiryDate = null),
             ),
@@ -279,20 +295,21 @@ class _NumberField extends StatelessWidget {
 
 class _ExpiryField extends StatelessWidget {
   final DateTime? date;
+  final String emptyLabel;
   final VoidCallback onPick;
   final VoidCallback onClear;
 
   const _ExpiryField({
     required this.date,
+    this.emptyLabel = 'تاریخ خرابی (اختیاری)',
     required this.onPick,
     required this.onClear,
   });
 
   @override
   Widget build(BuildContext context) {
-    final text = date == null
-        ? 'تاریخ خرابی (اختیاری)'
-        : 'تاریخ خرابی: ${DateFormat('yyyy/MM/dd').format(date!)}';
+    final text =
+        date == null ? emptyLabel : DateFormat('yyyy/MM/dd').format(date!);
     return InkWell(
       onTap: onPick,
       borderRadius: BorderRadius.circular(12),

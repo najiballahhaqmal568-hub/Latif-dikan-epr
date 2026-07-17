@@ -30,7 +30,9 @@ class _QuantityDialog extends StatefulWidget {
 class _QuantityDialogState extends State<_QuantityDialog> {
   final TextEditingController _controller = TextEditingController();
 
-  static const List<double> _presets = [0.5, 1, 2, 5];
+  // پیش‌فرض‌های مقدار — برای جی‌بی (وای‌فای) اعداد بزرگ‌تر.
+  List<double> get _presets =>
+      widget.product.unit == 'gb' ? const [1, 2, 5, 10] : const [0.5, 1, 2, 5];
 
   @override
   void dispose() {

@@ -40,6 +40,33 @@ class CustomerRepository {
     });
   }
 
+  /// افزودن قرض قبلی (پیش از اپ). اگر نام از قبل باشد به قرضش اضافه می‌شود.
+  Future<void> addOpeningDebt({
+    required String name,
+    String? phone,
+    required double amount,
+  }) async {
+    final db = await _helper.database;
+    final existing = await db.query('customers',
+        where: 'name = ? COLLATE NOCASE', whereArgs: [name.trim()], limit: 1);
+    if (existing.isNotEmpty) {
+      final cid = existing.first['id'] as int;
+      await db.rawUpdate(
+          'UPDATE customers SET debt = debt + ? WHERE id = ?', [amount, cid]);
+      if ((phone ?? '').isNotEmpty &&
+          ((existing.first['phone'] as String?) ?? '').isEmpty) {
+        await db.update('customers', {'phone': phone},
+            where: 'id = ?', whereArgs: [cid]);
+      }
+    } else {
+      await db.insert('customers', {
+        'name': name.trim(),
+        'phone': (phone == null || phone.isEmpty) ? null : phone,
+        'debt': amount,
+      });
+    }
+  }
+
   /// رسیدهای دریافت از یک مشتری.
   Future<List<Payment>> getPayments(int customerId) async {
     final db = await _helper.database;

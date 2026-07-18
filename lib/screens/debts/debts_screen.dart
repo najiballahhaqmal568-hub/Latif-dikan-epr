@@ -100,8 +100,33 @@ class _CustomersViewState extends State<_CustomersView> {
     _reload();
   }
 
+  Future<void> _addDebtor() async {
+    final r = await showModalBottomSheet<_DebtorInput>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => const _AddDebtorDialog(isCustomer: true),
+    );
+    if (r == null) return;
+    await _repo.addOpeningDebt(name: r.name, phone: r.phone, amount: r.amount);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('ثبت شد ✓')));
+    _reload();
+  }
+
   @override
   Widget build(BuildContext context) {
+    return Column(
+      children: [
+        _AddDebtorButton(
+            label: 'افزودن مشتری قرض‌دار (قرض قبلی)', onTap: _addDebtor),
+        Expanded(child: _buildList()),
+      ],
+    );
+  }
+
+  Widget _buildList() {
     return FutureBuilder<List<Customer>>(
       future: _future,
       builder: (context, snap) {
@@ -113,7 +138,7 @@ class _CustomersViewState extends State<_CustomersView> {
           return const _EmptyDebt(
             icon: Icons.person_outline,
             text:
-                'هنوز مشتری قرضداری نیست.\nبا فروش «قرض» و نوشتن نام مشتری، اینجا ثبت می‌شود.',
+                'هنوز مشتری قرضداری نیست.\nبا فروش «قرض» یا دکمهٔ بالا اضافه کنید.',
           );
         }
         return ListView.builder(
@@ -265,8 +290,33 @@ class _SuppliersViewState extends State<_SuppliersView> {
     _reload();
   }
 
+  Future<void> _addDebtor() async {
+    final r = await showModalBottomSheet<_DebtorInput>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => const _AddDebtorDialog(isCustomer: false),
+    );
+    if (r == null) return;
+    await _repo.addOpeningDebt(name: r.name, phone: r.phone, amount: r.amount);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('ثبت شد ✓')));
+    _reload();
+  }
+
   @override
   Widget build(BuildContext context) {
+    return Column(
+      children: [
+        _AddDebtorButton(
+            label: 'افزودن تامین‌کننده (قرض قبلی)', onTap: _addDebtor),
+        Expanded(child: _buildList()),
+      ],
+    );
+  }
+
+  Widget _buildList() {
     return FutureBuilder<List<Supplier>>(
       future: _future,
       builder: (context, snap) {
@@ -278,7 +328,7 @@ class _SuppliersViewState extends State<_SuppliersView> {
           return const _EmptyDebt(
             icon: Icons.handshake_outlined,
             text:
-                'هنوز تامین‌کننده‌ای نیست.\nبا ثبت فاکتور خرید، تامین‌کننده ساخته می‌شود.',
+                'هنوز تامین‌کننده‌ای نیست.\nبا فاکتور خرید یا دکمهٔ بالا اضافه کنید.',
           );
         }
         return ListView.builder(
@@ -694,6 +744,153 @@ class _PayDialogState extends State<_PayDialog> {
           child: Text(widget.actionLabel),
         ),
       ],
+    );
+  }
+}
+
+/// دکمهٔ «افزودن» بالای دفتر قرض.
+class _AddDebtorButton extends StatelessWidget {
+  final String label;
+  final VoidCallback onTap;
+
+  const _AddDebtorButton({required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
+      child: OutlinedButton.icon(
+        onPressed: onTap,
+        icon: const Icon(Icons.add),
+        label: Text(label),
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size.fromHeight(50),
+          side: const BorderSide(color: AppTheme.primary, width: 1.5),
+          foregroundColor: AppTheme.primary,
+          textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+        ),
+      ),
+    );
+  }
+}
+
+/// نتیجهٔ فورم افزودن قرض قبلی.
+class _DebtorInput {
+  final String name;
+  final String? phone;
+  final double amount;
+  const _DebtorInput(this.name, this.phone, this.amount);
+}
+
+class _AddDebtorDialog extends StatefulWidget {
+  final bool isCustomer;
+  const _AddDebtorDialog({required this.isCustomer});
+
+  @override
+  State<_AddDebtorDialog> createState() => _AddDebtorDialogState();
+}
+
+class _AddDebtorDialogState extends State<_AddDebtorDialog> {
+  final TextEditingController _nameCtrl = TextEditingController();
+  final TextEditingController _phoneCtrl = TextEditingController();
+  final TextEditingController _amtCtrl = TextEditingController();
+  bool _nameErr = false;
+  bool _amtErr = false;
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _phoneCtrl.dispose();
+    _amtCtrl.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final name = _nameCtrl.text.trim();
+    final amt = double.tryParse(_amtCtrl.text.trim());
+    setState(() {
+      _nameErr = name.isEmpty;
+      _amtErr = amt == null || amt < 0;
+    });
+    if (name.isEmpty || amt == null || amt < 0) return;
+    Navigator.pop(
+        context, _DebtorInput(name, _phoneCtrl.text.trim(), amt));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isCust = widget.isCustomer;
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 18,
+        right: 18,
+        top: 4,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(isCust ? 'افزودن مشتری قرض‌دار' : 'افزودن تامین‌کننده',
+              style:
+                  const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 4),
+          const Text('برای قرض‌هایی که از قبل (پیش از اپ) وجود داشت.',
+              style: TextStyle(fontSize: 13, color: Colors.grey)),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _nameCtrl,
+            autofocus: true,
+            style: const TextStyle(fontSize: 18),
+            decoration: InputDecoration(
+              labelText: 'نام',
+              prefixIcon: const Icon(Icons.person),
+              errorText: _nameErr ? 'نام را بنویسید' : null,
+            ),
+            onChanged: (_) {
+              if (_nameErr) setState(() => _nameErr = false);
+            },
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _phoneCtrl,
+            keyboardType: TextInputType.phone,
+            textDirection: TextDirection.ltr,
+            decoration: const InputDecoration(
+              labelText: 'نمبر تیلفون (اختیاری)',
+              prefixIcon: Icon(Icons.phone),
+            ),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _amtCtrl,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))
+            ],
+            textDirection: TextDirection.ltr,
+            style: const TextStyle(fontSize: 19),
+            decoration: InputDecoration(
+              labelText: isCust
+                  ? 'مبلغ قرض او به ما (افغانی)'
+                  : 'مبلغ قرض ما به او (افغانی)',
+              prefixIcon: const Icon(Icons.account_balance_wallet),
+              errorText: _amtErr ? 'مبلغ را درست بنویسید' : null,
+            ),
+            onChanged: (_) {
+              if (_amtErr) setState(() => _amtErr = false);
+            },
+          ),
+          const SizedBox(height: 18),
+          ElevatedButton.icon(
+            onPressed: _submit,
+            icon: const Icon(Icons.check),
+            label: const Text('ثبت'),
+            style: ElevatedButton.styleFrom(
+                minimumSize: const Size.fromHeight(56)),
+          ),
+        ],
+      ),
     );
   }
 }

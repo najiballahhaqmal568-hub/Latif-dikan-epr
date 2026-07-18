@@ -50,6 +50,33 @@ class SupplierRepository {
     });
   }
 
+  /// افزودن قرض قبلی (پیش از اپ). اگر نام از قبل باشد به قرضش اضافه می‌شود.
+  Future<void> addOpeningDebt({
+    required String name,
+    String? phone,
+    required double amount,
+  }) async {
+    final db = await _helper.database;
+    final existing = await db.query('suppliers',
+        where: 'name = ? COLLATE NOCASE', whereArgs: [name.trim()], limit: 1);
+    if (existing.isNotEmpty) {
+      final sid = existing.first['id'] as int;
+      await db.rawUpdate(
+          'UPDATE suppliers SET debt = debt + ? WHERE id = ?', [amount, sid]);
+      if ((phone ?? '').isNotEmpty &&
+          ((existing.first['phone'] as String?) ?? '').isEmpty) {
+        await db.update('suppliers', {'phone': phone},
+            where: 'id = ?', whereArgs: [sid]);
+      }
+    } else {
+      await db.insert('suppliers', {
+        'name': name.trim(),
+        'phone': (phone == null || phone.isEmpty) ? null : phone,
+        'debt': amount,
+      });
+    }
+  }
+
   /// رسیدهای پرداخت به یک تامین‌کننده.
   Future<List<Payment>> getPayments(int supplierId) async {
     final db = await _helper.database;

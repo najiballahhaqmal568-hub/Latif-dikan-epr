@@ -1065,12 +1065,13 @@
   // ---------- Suppliers (قرض تامین‌کننده) ----------
   function renderSuppliers() {
     var el = $("#supplierList");
+    var addBtn = '<div style="padding:8px 14px 4px"><button class="addline" id="addSupplierBtn" style="margin:0">＋ افزودن تامین‌کننده (قرض قبلی)</button></div>';
     if (suppliers.length === 0) {
-      el.innerHTML = '<div class="empty"><div class="big">🤝</div><p>هنوز تامین‌کننده‌ای نیست.<br>با ثبت فاکتور خرید، تامین‌کننده ساخته می‌شود.</p></div>';
+      el.innerHTML = addBtn + '<div class="empty"><div class="big">🤝</div><p>هنوز تامین‌کننده‌ای نیست.<br>با فاکتور خرید یا دکمهٔ بالا اضافه کنید.</p></div>';
       return;
     }
     var sorted = suppliers.slice().sort(function (a, b) { return b.debt - a.debt; });
-    el.innerHTML = sorted.map(function (s) {
+    el.innerHTML = addBtn + sorted.map(function (s) {
       var low = s.debt > 0;
       return '<div class="prow u">' +
         '<div class="tapzone" data-supplier="' + s.id + '" role="button" tabindex="0">' +
@@ -1138,12 +1139,13 @@
   // ---------- Customers (قرض مشتری) ----------
   function renderCustomers() {
     var el = $("#customerList");
+    var addBtn = '<div style="padding:8px 14px 4px"><button class="addline" id="addCustomerBtn" style="margin:0">＋ افزودن مشتری قرض‌دار (قرض قبلی)</button></div>';
     if (customers.length === 0) {
-      el.innerHTML = '<div class="empty"><div class="big">👤</div><p>هنوز مشتری قرضداری نیست.<br>با فروش «قرض» و نوشتن نام مشتری، اینجا ثبت می‌شود.</p></div>';
+      el.innerHTML = addBtn + '<div class="empty"><div class="big">👤</div><p>هنوز مشتری قرضداری نیست.<br>با فروش «قرض» یا دکمهٔ بالا اضافه کنید.</p></div>';
       return;
     }
     var sorted = customers.slice().sort(function (a, b) { return b.debt - a.debt; });
-    el.innerHTML = sorted.map(function (c) {
+    el.innerHTML = addBtn + sorted.map(function (c) {
       var low = c.debt > 0;
       return '<div class="prow w">' +
         '<div class="tapzone" data-customer="' + c.id + '" role="button" tabindex="0">' +
@@ -1153,6 +1155,39 @@
         '<div class="qty"><div class="q num ' + (low ? "low" : "") + '">' + money(c.debt) + '</div><small>' + (low ? "قرض او" : "تصفیه") + '</small></div>' +
         '</div>';
     }).join("");
+  }
+
+  // افزودن قرض قبلی (مشتری یا تامین‌کننده) که پیش از اپ وجود داشت.
+  function openDebtorForm(kind) {
+    var isCust = kind === "customer";
+    openSheet(
+      '<h2>' + (isCust ? 'افزودن مشتری قرض‌دار' : 'افزودن تامین‌کننده') + '</h2>' +
+      '<p style="margin:-6px 0 12px;color:var(--ink-soft);font-size:13px">برای قرض‌هایی که از قبل (پیش از اپ) وجود داشت. اگر نام از قبل باشد، به قرضش اضافه می‌شود.</p>' +
+      '<div class="field"><label>نام</label><input id="dbName" type="text" placeholder="نام" /><div class="err" id="eDbName">نام را بنویسید</div></div>' +
+      '<div class="field"><label>نمبر تیلفون (اختیاری)</label><input id="dbPhone" type="text" inputmode="tel" placeholder="07..." style="direction:ltr;text-align:right" /></div>' +
+      '<div class="field"><label>' + (isCust ? 'مبلغ قرض او به ما (افغانی)' : 'مبلغ قرض ما به او (افغانی)') + '</label><input id="dbAmt" type="number" inputmode="decimal" step="any" min="0" placeholder="0" /><div class="err" id="eDbAmt">مبلغ را درست بنویسید</div></div>' +
+      '<div class="actions"><button class="ghost" data-close>لغو</button><button class="primary" id="dbOk">ثبت</button></div>'
+    );
+    $("#dbOk").addEventListener("click", function () {
+      var nm = $("#dbName").value.trim();
+      var amt = parseFloat($("#dbAmt").value);
+      var badN = !nm;
+      var badA = !($("#dbAmt").value !== "" && !isNaN(amt) && amt >= 0);
+      $("#eDbName").classList.toggle("show", badN);
+      $("#eDbAmt").classList.toggle("show", badA);
+      if (badN || badA) return;
+      var phone = $("#dbPhone").value.trim();
+      var arr = isCust ? customers : suppliers;
+      var found = null;
+      for (var i = 0; i < arr.length; i++) { if (arr[i].name.trim().toLowerCase() === nm.toLowerCase()) { found = arr[i]; break; } }
+      if (found) { found.debt = +(found.debt + amt).toFixed(2); if (phone && !found.phone) found.phone = phone; }
+      else { arr.push({ id: id(), name: nm, phone: phone, debt: amt }); }
+      save(isCust ? LS_CUST : LS_SUP, arr);
+      closeSheet();
+      if (isCust) renderCustomers(); else renderSuppliers();
+      toast("ثبت شد ✓");
+    });
+    setTimeout(function () { $("#dbName").focus(); }, 60);
   }
 
   function openCustomerDetail(c) {
@@ -1783,12 +1818,14 @@
     var c = e.target.closest("[data-purchase]"); if (c) { var pu = findPurchase(c.dataset.purchase); if (pu) openPurchaseDetail(pu); }
   });
   $("#supplierList").addEventListener("click", function (e) {
+    if (e.target.closest("#addSupplierBtn")) { openDebtorForm("supplier"); return; }
     var c = e.target.closest("[data-supplier]"); if (c) { var s = findS(c.dataset.supplier); if (s) openSupplierDetail(s); }
   });
   $("#supplierList").addEventListener("keydown", function (e) {
     if (e.key === "Enter" || e.key === " ") { var c = e.target.closest("[data-supplier]"); if (c) { e.preventDefault(); var s = findS(c.dataset.supplier); if (s) openSupplierDetail(s); } }
   });
   $("#customerList").addEventListener("click", function (e) {
+    if (e.target.closest("#addCustomerBtn")) { openDebtorForm("customer"); return; }
     var c = e.target.closest("[data-customer]"); if (c) { var cu = findC(c.dataset.customer); if (cu) openCustomerDetail(cu); }
   });
   $("#customerList").addEventListener("keydown", function (e) {

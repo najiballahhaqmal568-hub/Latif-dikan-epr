@@ -1364,26 +1364,17 @@
       prodHtml;
   }
 
-  // ---------- Online sync (Firebase) ----------
+  // ---------- Online sync (Supabase) ----------
   var READONLY = false;
-  var SYNC = { db: null, unsub: null, clientId: null, pushTimer: null, status: "خاموش" };
-
-  function parseFirebaseConfig(text) {
-    if (!text) return null;
-    var t = String(text).trim();
-    var a = t.indexOf("{"), b = t.lastIndexOf("}");
-    if (a < 0 || b < 0) return null;
-    var obj = t.slice(a, b + 1);
-    try { return JSON.parse(obj); } catch (e) {}
-    try { return (new Function("return (" + obj + ")"))(); } catch (e) { return null; }
-  }
+  var SYNC = { clientId: null, pushTimer: null, pollTimer: null, status: "خاموش", lastTs: 0, busy: false };
 
   function syncCfg() {
     return {
       role: localStorage.getItem("dukan.sync.role") || "owner",
-      shop: localStorage.getItem("dukan.sync.shop") || "",
-      enabled: localStorage.getItem("dukan.sync.enabled") === "1",
-      config: parseFirebaseConfig(localStorage.getItem("dukan.sync.config") || "")
+      shop: (localStorage.getItem("dukan.sync.shop") || "").trim(),
+      url: (localStorage.getItem("dukan.sync.url") || "").trim().replace(/\/+$/, ""),
+      key: (localStorage.getItem("dukan.sync.key") || "").trim(),
+      enabled: localStorage.getItem("dukan.sync.enabled") === "1"
     };
   }
 
@@ -1409,81 +1400,92 @@
 
   function setSyncStatus(s) { SYNC.status = s; var el = document.getElementById("syncStatus"); if (el) el.textContent = s; }
   function fmtTime(ms) { if (!ms) return ""; var d = new Date(ms); function p(n) { return n < 10 ? "0" + n : n; } return fmtDate(d.toISOString()) + " " + p(d.getHours()) + ":" + p(d.getMinutes()); }
-
-  var firebaseLoaded = false;
-  function loadScript(src) { return new Promise(function (res, rej) { var s = document.createElement("script"); s.src = src; s.onload = res; s.onerror = function () { rej(new Error("بارنشدن " + src)); }; document.head.appendChild(s); }); }
-  function ensureFirebase() {
-    if (firebaseLoaded) return Promise.resolve();
-    var base = "https://www.gstatic.com/firebasejs/10.12.2/";
-    return loadScript(base + "firebase-app-compat.js")
-      .then(function () { return loadScript(base + "firebase-firestore-compat.js"); })
-      .then(function () { return loadScript(base + "firebase-auth-compat.js"); })
-      .then(function () { firebaseLoaded = true; });
-  }
   function syncClientId() { var c = localStorage.getItem("dukan.sync.client"); if (!c) { c = id() + id(); localStorage.setItem("dukan.sync.client", c); } return c; }
+
+  function sbHeaders(cfg) { return { "apikey": cfg.key, "Authorization": "Bearer " + cfg.key, "Content-Type": "application/json" }; }
+  function sbUrl(cfg, q) { return cfg.url + "/rest/v1/dukan_shops" + (q || ""); }
+
+  // خواندن سند دوکان از Supabase
+  function syncPull() {
+    var cfg = syncCfg();
+    return fetch(sbUrl(cfg, "?shop=eq." + encodeURIComponent(cfg.shop) + "&select=payload,ts,by"), { headers: sbHeaders(cfg) })
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then(function (rows) { return (rows && rows.length) ? rows[0] : null; });
+  }
+  // نوشتن (upsert) سند دوکان
+  function syncPushNow() {
+    var cfg = syncCfg();
+    if (cfg.role !== "owner" || !cfg.url || !cfg.key || !cfg.shop) return Promise.resolve();
+    var ts = Date.now();
+    var body = [{ shop: cfg.shop, payload: collectData(), ts: ts, by: SYNC.clientId }];
+    return fetch(sbUrl(cfg, "?on_conflict=shop"), {
+      method: "POST",
+      headers: Object.assign({ "Prefer": "resolution=merge-duplicates,return=minimal" }, sbHeaders(cfg)),
+      body: JSON.stringify(body)
+    }).then(function (r) {
+      if (!r.ok) return r.text().then(function (t) { throw new Error("HTTP " + r.status + " " + t.slice(0, 120)); });
+      SYNC.lastTs = ts; setSyncStatus("سنک شد — " + fmtTime(ts));
+    }).catch(function (e) { setSyncStatus("خطا در فرستادن: " + (e.message || e)); });
+  }
+
+  function syncOnLocalSave() {
+    var cfg = syncCfg();
+    if (!cfg.enabled || cfg.role !== "owner" || READONLY) return;
+    clearTimeout(SYNC.pushTimer);
+    SYNC.pushTimer = setTimeout(function () { syncPushNow(); }, 1500);
+  }
+
+  // چک دوره‌ای برای معلومات جدید (برادر زنده، و مالک از دستگاه دیگر)
+  function syncPoll() {
+    if (SYNC.busy) return;
+    SYNC.busy = true;
+    syncPull().then(function (row) {
+      SYNC.busy = false;
+      if (!row) { setSyncStatus(READONLY ? "هنوز معلوماتی از دوکان نیامده" : "روشن — هنوز چیزی نفرستاده‌اید"); return; }
+      if (row.ts && row.ts > SYNC.lastTs && row.by !== SYNC.clientId) {
+        SYNC.lastTs = row.ts;
+        applyData(row.payload);
+        setSyncStatus((READONLY ? "زنده (فقط دیدن) — " : "سنک شد — ") + fmtTime(row.ts));
+      } else if (!READONLY) {
+        setSyncStatus("روشن (مالک) — " + fmtTime(SYNC.lastTs || row.ts));
+      }
+    }).catch(function (e) { SYNC.busy = false; setSyncStatus("خطا: " + (e.message || e)); });
+  }
 
   function syncStart() {
     var cfg = syncCfg();
-    if (!cfg.config || !cfg.shop) { toast("اول تنظیمات Firebase و کد دوکان را کامل کنید", true); return; }
+    if (!cfg.url || !cfg.key || !cfg.shop) { toast("اول URL و کلید Supabase و کد دوکان را پر کنید", true); return; }
     SYNC.clientId = syncClientId();
+    localStorage.setItem("dukan.sync.enabled", "1");
     setSyncStatus("در حال وصل شدن...");
-    ensureFirebase().then(function () {
-      try { if (!firebase.apps.length) firebase.initializeApp(cfg.config); } catch (e) {}
-      SYNC.db = firebase.firestore();
-      return firebase.auth().signInAnonymously();
-    }).then(function () {
-      var ref = SYNC.db.collection("dukan_shops").doc(cfg.shop);
-      if (SYNC.unsub) { SYNC.unsub(); SYNC.unsub = null; }
-      localStorage.setItem("dukan.sync.enabled", "1");
+    if (SYNC.pollTimer) { clearInterval(SYNC.pollTimer); SYNC.pollTimer = null; }
+    syncPull().then(function (row) {
       if (cfg.role === "viewer") {
         READONLY = true; document.body.classList.add("readonly");
-        SYNC.unsub = ref.onSnapshot(function (doc) {
-          if (doc.exists) { var d = doc.data(); if (d && d.data) { applyData(d.data); setSyncStatus("زنده (فقط دیدن) — آخرین سنک: " + fmtTime(d.ts)); } }
-          else setSyncStatus("هنوز معلوماتی از دوکان نیامده");
-        }, function (e) { setSyncStatus("خطا: " + (e.code || e.message)); });
+        if (row && row.payload) { SYNC.lastTs = row.ts || 0; applyData(row.payload); setSyncStatus("زنده (فقط دیدن) — " + fmtTime(row.ts)); }
+        else setSyncStatus("وصل شد — هنوز معلوماتی از دوکان نیامده");
       } else {
         READONLY = false; document.body.classList.remove("readonly");
-        ref.get().then(function (snap) {
-          if (snap.exists && snap.data() && snap.data().data) { applyData(snap.data().data); setSyncStatus("سنک شد از آنلاین"); }
-          else { syncPushNow(); }
-          SYNC.unsub = ref.onSnapshot(function (doc) {
-            if (doc.exists) { var d = doc.data(); if (d && d.by && d.by !== SYNC.clientId && d.data) { applyData(d.data); setSyncStatus("سنک شد — " + fmtTime(d.ts)); } }
-          });
-        });
-        setSyncStatus("روشن (مالک)");
+        if (row && row.payload) { SYNC.lastTs = row.ts || 0; applyData(row.payload); setSyncStatus("سنک شد از آنلاین"); }
+        else { syncPushNow(); }
       }
+      // چک دوره‌ای هر ۸ ثانیه
+      SYNC.pollTimer = setInterval(syncPoll, 8000);
       if (moreView === "sync") renderMore();
-    }).catch(function (e) { setSyncStatus("خطا: " + (e.message || e.code || e)); toast("خطا در سنک: " + (e.message || e), true); });
+    }).catch(function (e) { setSyncStatus("خطا در وصل: " + (e.message || e)); toast("خطا در سنک: " + (e.message || e), true); });
   }
 
   function syncStop() {
-    if (SYNC.unsub) { SYNC.unsub(); SYNC.unsub = null; }
+    if (SYNC.pollTimer) { clearInterval(SYNC.pollTimer); SYNC.pollTimer = null; }
     READONLY = false; document.body.classList.remove("readonly");
     localStorage.setItem("dukan.sync.enabled", "0");
     setSyncStatus("خاموش"); toast("سنک خاموش شد");
     if (moreView === "sync") renderMore();
   }
 
-  function syncPushNow() {
-    if (!SYNC.db) return;
-    var cfg = syncCfg();
-    if (cfg.role !== "owner") return;
-    return SYNC.db.collection("dukan_shops").doc(cfg.shop).set({ data: collectData(), ts: Date.now(), by: SYNC.clientId })
-      .then(function () { setSyncStatus("سنک شد — " + fmtTime(Date.now())); })
-      .catch(function (e) { setSyncStatus("خطا در فرستادن: " + (e.code || e.message)); });
-  }
-
-  function syncOnLocalSave() {
-    var cfg = syncCfg();
-    if (!cfg.enabled || cfg.role !== "owner" || READONLY || !SYNC.db) return;
-    clearTimeout(SYNC.pushTimer);
-    SYNC.pushTimer = setTimeout(function () { syncPushNow(); }, 1500);
-  }
-
   function renderSync(el) {
     var cfg = syncCfg();
     var role = cfg.role;
-    var rawCfg = localStorage.getItem("dukan.sync.config") || "";
     el.innerHTML =
       '<div class="subhead"><button class="back moreBack" aria-label="بازگشت">→</button><h3>سنک آنلاین و بک‌آپ</h3></div>' +
       '<div class="sync-status" id="syncStatus">' + esc(SYNC.status) + '</div>' +
@@ -1495,18 +1497,19 @@
         '<div class="field"><label>کد دوکان (یکسان در هر دو تلیفون)</label>' +
           '<input id="syncShop" type="text" value="' + esc(cfg.shop) + '" placeholder="dukan-latif-7788" style="direction:ltr;text-align:left" />' +
           '<button class="ghost" id="syncGen" style="margin-top:8px;padding:8px 12px">ساختن کد تصادفی</button></div>' +
-        '<div class="field"><label>تنظیمات Firebase (کد config را اینجا بچسپانید)</label>' +
-          '<textarea id="syncCfg" placeholder="{ apiKey: ... , projectId: ... }">' + esc(rawCfg) + '</textarea></div>' +
+        '<div class="field"><label>Project URL (از Supabase)</label>' +
+          '<input id="syncUrl" type="text" value="' + esc(localStorage.getItem("dukan.sync.url") || "") + '" placeholder="https://xxxx.supabase.co" style="direction:ltr;text-align:left" /></div>' +
+        '<div class="field"><label>anon key (کلید عمومی از Supabase)</label>' +
+          '<textarea id="syncKey" placeholder="eyJhbGciOi..." style="min-height:80px">' + esc(localStorage.getItem("dukan.sync.key") || "") + '</textarea></div>' +
         '<div class="actions"><button class="ghost" id="syncSave">ذخیره تنظیمات</button>' +
           (cfg.enabled ? '<button class="primary" id="syncOff" style="background:var(--danger)">خاموش‌کردن سنک</button>' : '<button class="primary" id="syncOn">روشن‌کردن سنک</button>') +
         '</div>' +
         '<div style="margin:14px 0 24px;font-size:13px;color:var(--ink-soft);line-height:2.1">' +
-          '<b>چطور Firebase بسازم؟</b><br>' +
-          '۱) به <span style="direction:ltr">console.firebase.google.com</span> بروید و یک پروژهٔ رایگان بسازید.<br>' +
-          '۲) «Firestore Database» را بسازید.<br>' +
-          '۳) یک «Web app» اضافه کنید؛ کد <span style="direction:ltr">firebaseConfig</span> را کاپی و اینجا بچسپانید.<br>' +
-          '۴) در «Authentication» روش «Anonymous» را روشن کنید.<br>' +
-          '۵) قوانین Firestore را که برایتان می‌فرستم بگذارید، بعد نقش/کد را انتخاب، ذخیره و روشن کنید.' +
+          '<b>چطور Supabase بسازم؟</b><br>' +
+          '۱) به <span style="direction:ltr">supabase.com</span> بروید و با GitHub وارد شوید → New project.<br>' +
+          '۲) یک جدول با SQL بسازید (کد را برایتان می‌فرستم).<br>' +
+          '۳) از Settings → API، «Project URL» و «anon public» key را کاپی و اینجا بچسپانید.<br>' +
+          '۴) نقش/کد دوکان را انتخاب، ذخیره و «روشن‌کردن سنک». در تلیفون برادر همان‌ها را با نقش «فقط دیدن» بگذارید.' +
         '</div>' +
       '</div>';
     el.querySelectorAll("#syncRole button").forEach(function (b) {
@@ -1520,7 +1523,8 @@
     });
     function persistSettings() {
       localStorage.setItem("dukan.sync.shop", document.getElementById("syncShop").value.trim());
-      localStorage.setItem("dukan.sync.config", document.getElementById("syncCfg").value.trim());
+      localStorage.setItem("dukan.sync.url", document.getElementById("syncUrl").value.trim());
+      localStorage.setItem("dukan.sync.key", document.getElementById("syncKey").value.trim());
     }
     document.getElementById("syncSave").addEventListener("click", function () { persistSettings(); toast("تنظیمات ذخیره شد ✓"); });
     var onBtn = document.getElementById("syncOn"); if (onBtn) onBtn.addEventListener("click", function () { persistSettings(); syncStart(); });
@@ -1900,7 +1904,7 @@
   renderCart();
   switchTab("sales");
   // اگر سنک قبلاً روشن بوده، خودکار وصل شود
-  try { var _sc = syncCfg(); if (_sc.enabled && _sc.config && _sc.shop) syncStart(); } catch (e) {}
+  try { var _sc = syncCfg(); if (_sc.enabled && _sc.url && _sc.key && _sc.shop) syncStart(); } catch (e) {}
 })();
 </script>
 </html>

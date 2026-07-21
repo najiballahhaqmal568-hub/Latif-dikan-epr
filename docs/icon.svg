@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" rx="96" fill="#1F7A4D"/>
+  <!-- سایه‌بان دوکان -->
+  <rect x="96" y="150" width="320" height="60" rx="12" fill="#ffffff"/>
+  <g fill="#E7B24A">
+    <rect x="96" y="150" width="53" height="60"/>
+    <rect x="202" y="150" width="53" height="60"/>
+    <rect x="309" y="150" width="53" height="60"/>
+  </g>
+  <!-- بدنه -->
+  <rect x="120" y="210" width="272" height="196" rx="10" fill="#ffffff"/>
+  <!-- دروازه -->
+  <rect x="228" y="286" width="80" height="120" rx="6" fill="#1F7A4D"/>
+  <circle cx="296" cy="348" r="7" fill="#E7B24A"/>
+  <!-- کلکین -->
+  <rect x="150" y="250" width="60" height="46" rx="6" fill="#DCEFE4"/>
+</svg>

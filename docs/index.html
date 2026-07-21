@@ -4,6 +4,12 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
 <meta name="theme-color" content="#1F7A4D" />
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="icon" href="icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="icon.svg" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="دوکان لطیف" />
+<meta name="mobile-web-app-capable" content="yes" />
 <title>دوکان لطیف</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
 <style>
@@ -1905,6 +1911,13 @@
   switchTab("sales");
   // اگر سنک قبلاً روشن بوده، خودکار وصل شود
   try { var _sc = syncCfg(); if (_sc.enabled && _sc.url && _sc.key && _sc.shop) syncStart(); } catch (e) {}
+
+  // ثبت سرویس‌ورکر برای نصب‌شدن مثل اپ و کارکرد آفلاین
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", function () {
+      navigator.serviceWorker.register("sw.js").catch(function () {});
+    });
+  }
 })();
 </script>
 </html>

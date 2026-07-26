@@ -586,7 +586,12 @@
   var EXPIRY_WARN_DAYS = 14;
   var WIFI_LOW_GB = 20;
   function load(key, def) { try { return JSON.parse(localStorage.getItem(key)) || def; } catch (e) { return def; } }
-  function save0(key, val) { localStorage.setItem(key, JSON.stringify(val)); } // ذخیرهٔ خام (بدون سنک)
+  // ذخیرهٔ خام (بدون سنک). هر ذخیره، حافظهٔ موقت قرض‌ها را باطل می‌کند
+  // تا رقم قرض همیشه از رویدادهای تازه حساب شود.
+  function save0(key, val) {
+    localStorage.setItem(key, JSON.stringify(val));
+    if (typeof invalidateDebts === "function") invalidateDebts();
+  }
   function save(key, val) { save0(key, val); if (typeof syncOnLocalSave === "function") syncOnLocalSave(); }
 
   var products = load(LS_P, null);
@@ -628,6 +633,80 @@
   function findC(cid) { for (var i = 0; i < customers.length; i++) if (customers[i].id === cid) return customers[i]; return null; }
   function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
   function $(s) { return document.querySelector(s); }
+
+  // ---------- دفتر قرض ----------
+  // رقم قرض هیچ‌جا ذخیره نمی‌شود؛ همیشه از رویدادها حساب می‌گردد:
+  //   قرض مشتری   = قرض قبلی + فروش‌های قرضی (برگشتی منفی است) − دریافت‌ها
+  //   قرض تامین‌کننده = قرض قبلی + باقی‌ماندهٔ فاکتورها − پرداخت‌ها
+  // پس رقم هرگز نمی‌تواند از واقعیت دور شود، و هر رقم قابل پیگیری است.
+  var _debtCache = null;
+  function invalidateDebts() { _debtCache = null; }
+  function debtMaps() {
+    if (_debtCache) return _debtCache;
+    var c = {}, s = {};
+    sales.forEach(function (x) {
+      if (x.paymentType === "credit" && x.customerId)
+        c[x.customerId] = (c[x.customerId] || 0) + x.total;
+    });
+    custPayments.forEach(function (p) {
+      if (p.customerId) c[p.customerId] = (c[p.customerId] || 0) - p.amount;
+    });
+    purchases.forEach(function (p) {
+      if (p.supplierId) s[p.supplierId] = (s[p.supplierId] || 0) + (p.remaining || 0);
+    });
+    supPayments.forEach(function (p) {
+      if (p.supplierId) s[p.supplierId] = (s[p.supplierId] || 0) - p.amount;
+    });
+    _debtCache = { c: c, s: s };
+    return _debtCache;
+  }
+  function custDebt(c) {
+    if (!c) return 0;
+    return +(((c.opening || 0) + (debtMaps().c[c.id] || 0))).toFixed(2);
+  }
+  function supDebt(s) {
+    if (!s) return 0;
+    return +(((s.opening || 0) + (debtMaps().s[s.id] || 0))).toFixed(2);
+  }
+  // اجزای قرض مشتری/تامین‌کننده — برای نشان‌دادن «این رقم از کجا آمد»
+  function custBreakdown(c) {
+    var sale = 0, paid = 0;
+    sales.forEach(function (x) {
+      if (x.paymentType === "credit" && x.customerId === c.id) sale += x.total;
+    });
+    custPayments.forEach(function (p) { if (p.customerId === c.id) paid += p.amount; });
+    return { opening: c.opening || 0, sales: +sale.toFixed(2), paid: +paid.toFixed(2) };
+  }
+  function supBreakdown(s) {
+    var buy = 0, paid = 0;
+    purchases.forEach(function (p) { if (p.supplierId === s.id) buy += (p.remaining || 0); });
+    supPayments.forEach(function (p) { if (p.supplierId === s.id) paid += p.amount; });
+    return { opening: s.opening || 0, buys: +buy.toFixed(2), paid: +paid.toFixed(2) };
+  }
+  // فیلد debt فقط یک «آینه» برای بک‌آپ/سنک است؛ اپ هیچ‌وقت از آن نمی‌خواند.
+  function refreshDebtMirrors() {
+    customers.forEach(function (c) { c.debt = custDebt(c); });
+    suppliers.forEach(function (s) { s.debt = supDebt(s); });
+  }
+  // یک‌بار: «قرض قبلی» طوری حساب شود که رقم نشان‌داده‌شده هیچ تغییر نکند.
+  function migrateDebtsToLedger() {
+    var m = debtMaps(), changed = false;
+    customers.forEach(function (c) {
+      if (c.opening === undefined) {
+        var stored = typeof c.debt === "number" ? c.debt : 0;
+        c.opening = +(stored - (m.c[c.id] || 0)).toFixed(2);
+        changed = true;
+      }
+    });
+    suppliers.forEach(function (s) {
+      if (s.opening === undefined) {
+        var stored = typeof s.debt === "number" ? s.debt : 0;
+        s.opening = +(stored - (m.s[s.id] || 0)).toFixed(2);
+        changed = true;
+      }
+    });
+    if (changed) { save0(LS_CUST, customers); save0(LS_SUP, suppliers); }
+  }
   // ---------- تقویم هجری شمسی (نام ماه‌های افغانی) ----------
   // تاریخ‌ها در دیتا همیشه میلادی (ISO) ذخیره می‌شوند؛ فقط نمایش و
   // مرز ماه‌ها شمسی است. الگوریتم استاندارد جلالی (Borkowski).
@@ -890,8 +969,8 @@
     if (type === "credit" && nm) {
       var cust = null;
       for (var i = 0; i < customers.length; i++) { if (customers[i].name.trim().toLowerCase() === nm.toLowerCase()) { cust = customers[i]; break; } }
-      if (!cust) { cust = { id: id(), name: nm, phone: "", debt: 0 }; customers.push(cust); }
-      cust.debt = +(cust.debt + total).toFixed(2);
+      if (!cust) { cust = { id: id(), name: nm, phone: "", opening: 0 }; customers.push(cust); }
+      // قرض جدا زیاد نمی‌شود؛ خودِ همین فروش قرضی رویداد آن است
       customerId = cust.id;
       save(LS_CUST, customers);
     }
@@ -926,11 +1005,7 @@
       var p = findP(it.productId);
       if (p) p.qty = +(p.qty + it.quantity).toFixed(3);
     });
-    // اگر قرضی بود، قرض مشتری کم شود
-    if (sale.paymentType === "credit" && sale.customerId) {
-      var c = findC(sale.customerId);
-      if (c) c.debt = +(c.debt - sale.total).toFixed(2);
-    }
+    // قرض مشتری جدا کم نمی‌شود؛ خودِ رکورد منفی پایین، رویداد آن است
     sale.returned = true;
     sales.push({ id: id(), date: new Date().toISOString(), total: -sale.total,
       paymentType: sale.paymentType, customerName: sale.customerName, customerId: sale.customerId,
@@ -1466,7 +1541,7 @@
       p.buy = oldQty > 0 ? +(((oldQty * oldBuy) + (l.qty * l.buyPrice)) / (oldQty + l.qty)).toFixed(2) : l.buyPrice;
       p.qty = +(p.qty + l.qty).toFixed(3);
     });
-    sup.debt = +(sup.debt + remaining).toFixed(2);
+    // قرض تامین‌کننده جدا زیاد نمی‌شود؛ «باقی‌ماندهٔ» خودِ فاکتور رویداد آن است
 
     purchases.push({
       id: id(), supplierId: sup.id, supplierName: sup.name, date: draft.date || todayISO(),
@@ -1488,21 +1563,23 @@
       el.innerHTML = addBtn + '<div class="empty"><div class="big">🤝</div><p>هنوز تامین‌کننده‌ای نیست.<br>با فاکتور خرید یا دکمهٔ بالا اضافه کنید.</p></div>';
       return;
     }
-    var sorted = suppliers.slice().sort(function (a, b) { return b.debt - a.debt; });
+    var sorted = suppliers.slice().sort(function (a, b) { return supDebt(b) - supDebt(a); });
     el.innerHTML = addBtn + sorted.map(function (s) {
-      var low = s.debt > 0;
-      var lbl = s.debt > 0 ? "قرض ما" : (s.debt < 0 ? "پیش‌پرداخت ما" : "تصفیه");
+      var d = supDebt(s);
+      var low = d > 0;
+      var lbl = d > 0 ? "قرض ما" : (d < 0 ? "پیش‌پرداخت ما" : "تصفیه");
       return '<div class="prow u">' +
         '<div class="tapzone" data-supplier="' + s.id + '" role="button" tabindex="0">' +
           '<div class="ico">🤝</div>' +
           '<div class="info"><b>' + esc(s.name) + '</b><small>' + (s.phone ? esc(s.phone) : "بدون نمبر") + '</small></div>' +
         '</div>' +
-        '<div class="qty"><div class="q num ' + (low ? "low" : "") + '">' + money(Math.abs(s.debt)) + '</div><small>' + lbl + '</small></div>' +
+        '<div class="qty"><div class="q num ' + (low ? "low" : "") + '">' + money(Math.abs(d)) + '</div><small>' + lbl + '</small></div>' +
         '</div>';
     }).join("");
   }
 
   function openSupplierDetail(s) {
+    var sd = supDebt(s), sb = supBreakdown(s);
     var theirs = purchases.filter(function (p) { return p.supplierId === s.id; })
       .sort(function (a, b) { return (b.date || "").localeCompare(a.date || ""); });
     var rows = theirs.length === 0 ? '<p style="color:var(--ink-soft);text-align:center;padding:8px">فاکتوری نیست</p>'
@@ -1512,7 +1589,13 @@
     openSheet(
       '<h2>' + esc(s.name) + '</h2>' +
       (s.phone ? '<p style="margin:-6px 0 10px;color:var(--ink-soft)" class="num">' + esc(s.phone) + '</p>' : '') +
-      '<div class="sumbox"><div class="sumrow total"><span>' + (s.debt < 0 ? "پیش‌پرداخت ما نزد او" : "مجموع قرض ما") + '</span><span class="rem num">' + money(Math.abs(s.debt)) + '</span></div></div>' +
+      // این رقم از کجا آمد — هر جزء قابل دیدن است
+      '<div class="sumbox">' +
+        '<div class="sumrow"><span>قرض قبلی</span><span class="num">' + money(sb.opening) + '</span></div>' +
+        '<div class="sumrow"><span>باقی‌ماندهٔ فاکتورها</span><span class="num">＋ ' + money(sb.buys) + '</span></div>' +
+        '<div class="sumrow"><span>پرداخت‌های ما</span><span class="num">− ' + money(sb.paid) + '</span></div>' +
+        '<div class="sumrow total"><span>' + (sd < 0 ? "پیش‌پرداخت ما نزد او" : "مجموع قرض ما") + '</span><span class="rem num">' + money(Math.abs(sd)) + '</span></div>' +
+      '</div>' +
       '<button class="addline" id="payBtn" style="border-style:solid;background:var(--primary);color:var(--primary-ink);border-color:var(--primary)">💵 پرداخت به تامین‌کننده</button>' +
       '<label style="font-size:15px;font-weight:800;color:var(--ink-soft)">رسیدهای پرداخت</label>' +
       '<div style="margin-top:6px">' + payReceiptRows(supPayments, "supplierId", s.id) + '</div>' +
@@ -1536,7 +1619,7 @@
   function openPayDialog(s) {
     openSheet(
       '<h2>پرداخت به ' + esc(s.name) + '</h2>' +
-      '<p style="margin:-6px 0 12px;color:var(--ink-soft)">قرض فعلی: <b class="num">' + money(s.debt) + '</b></p>' +
+      '<p style="margin:-6px 0 12px;color:var(--ink-soft)">قرض فعلی: <b class="num">' + money(supDebt(s)) + '</b></p>' +
       '<div class="field"><label>مقدار پرداخت (افغانی)</label>' +
         '<input id="payAmt" type="number" inputmode="decimal" step="any" min="0" placeholder="0" /></div>' +
       '<div class="actions"><button class="ghost" data-close>لغو</button>' +
@@ -1545,8 +1628,8 @@
     $("#payOk").addEventListener("click", function () {
       var amt = parseFloat($("#payAmt").value) || 0;
       if (amt <= 0) return;
-      // اگر بیشتر از قرض پرداخت شد، باقی «پیش‌پرداخت» می‌ماند (منفی) و گم نمی‌شود
-      s.debt = +(s.debt - amt).toFixed(2);
+      // خودِ رسید پرداخت رویداد کم‌شدن قرض است؛ اگر بیشتر از قرض بود،
+      // رقم منفی می‌شود و «پیش‌پرداخت» نشان داده می‌شود.
       supPayments.push({ id: id(), supplierId: s.id, date: new Date().toISOString(), amount: amt });
       save(LS_SUP, suppliers); save(LS_SPAY, supPayments);
       renderSuppliers();
@@ -1564,16 +1647,17 @@
       el.innerHTML = addBtn + '<div class="empty"><div class="big">👤</div><p>هنوز مشتری قرضداری نیست.<br>با فروش «قرض» یا دکمهٔ بالا اضافه کنید.</p></div>';
       return;
     }
-    var sorted = customers.slice().sort(function (a, b) { return b.debt - a.debt; });
+    var sorted = customers.slice().sort(function (a, b) { return custDebt(b) - custDebt(a); });
     el.innerHTML = addBtn + sorted.map(function (c) {
-      var low = c.debt > 0;
-      var lbl = c.debt > 0 ? "قرض او" : (c.debt < 0 ? "پیش‌پرداخت او" : "تصفیه");
+      var d = custDebt(c);
+      var low = d > 0;
+      var lbl = d > 0 ? "قرض او" : (d < 0 ? "پیش‌پرداخت او" : "تصفیه");
       return '<div class="prow w">' +
         '<div class="tapzone" data-customer="' + c.id + '" role="button" tabindex="0">' +
           '<div class="ico">👤</div>' +
           '<div class="info"><b>' + esc(c.name) + '</b><small>' + (c.phone ? esc(c.phone) : "بدون نمبر") + '</small></div>' +
         '</div>' +
-        '<div class="qty"><div class="q num ' + (low ? "low" : "") + '">' + money(Math.abs(c.debt)) + '</div><small>' + lbl + '</small></div>' +
+        '<div class="qty"><div class="q num ' + (low ? "low" : "") + '">' + money(Math.abs(d)) + '</div><small>' + lbl + '</small></div>' +
         '</div>';
     }).join("");
   }
@@ -1601,8 +1685,9 @@
       var arr = isCust ? customers : suppliers;
       var found = null;
       for (var i = 0; i < arr.length; i++) { if (arr[i].name.trim().toLowerCase() === nm.toLowerCase()) { found = arr[i]; break; } }
-      if (found) { found.debt = +(found.debt + amt).toFixed(2); if (phone && !found.phone) found.phone = phone; }
-      else { arr.push({ id: id(), name: nm, phone: phone, debt: amt }); }
+      // «قرض قبلی» در opening ثبت می‌شود — نقطهٔ شروع دفتر
+      if (found) { found.opening = +((found.opening || 0) + amt).toFixed(2); if (phone && !found.phone) found.phone = phone; }
+      else { arr.push({ id: id(), name: nm, phone: phone, opening: amt }); }
       save(isCust ? LS_CUST : LS_SUP, arr);
       closeSheet();
       if (isCust) renderCustomers(); else renderSuppliers();
@@ -1612,16 +1697,27 @@
   }
 
   function openCustomerDetail(c) {
+    var cd = custDebt(c), cb = custBreakdown(c);
     var theirs = sales.filter(function (s) { return s.paymentType === "credit" && s.customerId === c.id; })
       .sort(function (a, b) { return (b.date || "").localeCompare(a.date || ""); });
     var rows = theirs.length === 0 ? '<p style="color:var(--ink-soft);text-align:center;padding:8px">فروش قرضی نیست</p>'
       : theirs.map(function (sa) {
-          return '<div class="iline"><div class="in"><b class="num">' + fmtDate(sa.date) + '</b><small class="num">' + sa.items.length + ' قلم</small></div><div class="lt num" style="color:var(--danger)">' + money(sa.total) + '</div></div>';
+          var isRet = !!sa.returnOf;
+          return '<div class="iline"><div class="in"><b class="num">' + fmtDate(sa.date) + '</b>' +
+            (isRet ? ' <span class="retbadge">برگشتی</span>' : '') +
+            '<small class="num">' + sa.items.length + ' قلم</small></div>' +
+            '<div class="lt num" style="color:' + (sa.total < 0 ? "var(--primary)" : "var(--danger)") + '">' + money(sa.total) + '</div></div>';
         }).join("");
     openSheet(
       '<h2>' + esc(c.name) + '</h2>' +
       (c.phone ? '<p style="margin:-6px 0 10px;color:var(--ink-soft)" class="num">' + esc(c.phone) + '</p>' : '') +
-      '<div class="sumbox"><div class="sumrow total"><span>' + (c.debt < 0 ? "پیش‌پرداخت او نزد ما" : "مجموع قرض او به ما") + '</span><span class="rem num">' + money(Math.abs(c.debt)) + '</span></div></div>' +
+      // این رقم از کجا آمد — هر جزء قابل دیدن است
+      '<div class="sumbox">' +
+        '<div class="sumrow"><span>قرض قبلی</span><span class="num">' + money(cb.opening) + '</span></div>' +
+        '<div class="sumrow"><span>فروش‌های قرضی</span><span class="num">＋ ' + money(cb.sales) + '</span></div>' +
+        '<div class="sumrow"><span>دریافت‌های ما</span><span class="num">− ' + money(cb.paid) + '</span></div>' +
+        '<div class="sumrow total"><span>' + (cd < 0 ? "پیش‌پرداخت او نزد ما" : "مجموع قرض او به ما") + '</span><span class="rem num">' + money(Math.abs(cd)) + '</span></div>' +
+      '</div>' +
       '<button class="addline" id="cPayBtn" style="border-style:solid;background:var(--primary);color:var(--primary-ink);border-color:var(--primary)">💵 دریافت پرداخت از مشتری</button>' +
       '<label style="font-size:15px;font-weight:800;color:var(--ink-soft)">رسیدهای دریافت</label>' +
       '<div style="margin-top:6px">' + payReceiptRows(custPayments, "customerId", c.id) + '</div>' +
@@ -1635,7 +1731,7 @@
   function openCustomerPay(c) {
     openSheet(
       '<h2>دریافت پرداخت از ' + esc(c.name) + '</h2>' +
-      '<p style="margin:-6px 0 12px;color:var(--ink-soft)">قرض فعلی: <b class="num">' + money(c.debt) + '</b></p>' +
+      '<p style="margin:-6px 0 12px;color:var(--ink-soft)">قرض فعلی: <b class="num">' + money(custDebt(c)) + '</b></p>' +
       '<div class="field"><label>مقدار دریافت (افغانی)</label>' +
         '<input id="cPayAmt" type="number" inputmode="decimal" step="any" min="0" placeholder="0" /></div>' +
       '<div class="actions"><button class="ghost" data-close>لغو</button>' +
@@ -1644,8 +1740,8 @@
     $("#cPayOk").addEventListener("click", function () {
       var amt = parseFloat($("#cPayAmt").value) || 0;
       if (amt <= 0) return;
-      // اگر بیشتر از قرض داد، باقی «پیش‌پرداخت» می‌ماند (منفی) و گم نمی‌شود
-      c.debt = +(c.debt - amt).toFixed(2);
+      // خودِ رسید دریافت رویداد کم‌شدن قرض است؛ اگر بیشتر از قرض داد،
+      // رقم منفی می‌شود و «پیش‌پرداخت» نشان داده می‌شود.
       custPayments.push({ id: id(), customerId: c.id, date: new Date().toISOString(), amount: amt });
       save(LS_CUST, customers); save(LS_CPAY, custPayments);
       renderCustomers();
@@ -1759,8 +1855,8 @@
     return r;
   }
 
-  function custDebtTotal() { var s = 0; customers.forEach(function (c) { s += c.debt; }); return s; }
-  function supDebtTotal() { var s = 0; suppliers.forEach(function (x) { s += x.debt; }); return s; }
+  function custDebtTotal() { var s = 0; customers.forEach(function (c) { s += custDebt(c); }); return s; }
+  function supDebtTotal() { var s = 0; suppliers.forEach(function (x) { s += supDebt(x); }); return s; }
 
   // برچسب دوره با نام ماه شمسی، تا معلوم باشد «این ماه» کدام ماه است
   function periodLabel() {
@@ -1836,6 +1932,7 @@
   }
 
   function collectData() {
+    refreshDebtMirrors(); // فیلد debt فقط برای بک‌آپ تازه می‌شود
     return { products: products, sales: sales, suppliers: suppliers, purchases: purchases, customers: customers, supPayments: supPayments, custPayments: custPayments, waste: waste, expenses: expenses, stockCounts: stockCounts };
   }
   function applyData(d) {
@@ -1852,6 +1949,10 @@
     if (d.stockCounts) stockCounts = d.stockCounts;
     save0(LS_P, products); save0(LS_S, sales); save0(LS_SUP, suppliers); save0(LS_PUR, purchases); save0(LS_CUST, customers);
     save0(LS_SPAY, supPayments); save0(LS_CPAY, custPayments); save0(LS_WASTE, waste); save0(LS_EXP, expenses); save0(LS_COUNTS, stockCounts);
+    // دیتای رسیده ممکن است از نسخهٔ کهنه باشد (بدون «قرض قبلی») — کوچ داده شود
+    invalidateDebts();
+    migrateMonthKeysToJalali();
+    migrateDebtsToLedger();
     renderCart(); switchTab(currentTab);
   }
 
@@ -2429,6 +2530,7 @@
 
   // ---------- Init ----------
   migrateMonthKeysToJalali();
+  migrateDebtsToLedger();
   renderSaleGrid();
   renderCart();
   switchTab("sales");

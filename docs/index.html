@@ -610,6 +610,7 @@
   var LS_P = "dukan.products.v1", LS_S = "dukan.sales.v1", LS_SEED = "dukan.seeded.v1";
   var LS_SUP = "dukan.suppliers.v1", LS_PUR = "dukan.purchases.v1", LS_CUST = "dukan.customers.v1";
   var LS_SPAY = "dukan.supPayments.v1", LS_CPAY = "dukan.custPayments.v1", LS_WASTE = "dukan.waste.v1", LS_EXP = "dukan.expenses.v1", LS_COUNTS = "dukan.stockCounts.v1";
+  var LS_CASH = "dukan.cash.v1"; // صندوق: موجودی اول، پول دستی، و تعدیل شمارش
   var EXPIRY_WARN_DAYS = 14;
   var WIFI_LOW_GB = 20;
   function load(key, def) { try { return JSON.parse(localStorage.getItem(key)) || def; } catch (e) { return def; } }
@@ -631,6 +632,7 @@
   var waste = load(LS_WASTE, []); // ضایعات
   var expenses = load(LS_EXP, []); // مصارف خانه
   var stockCounts = load(LS_COUNTS, []); // شمارش ماهانه (فرق‌ها)
+  var cashEntries = load(LS_CASH, []); // رویدادهای صندوق: opening | in | out | count
   if (products === null) {
     // نمونه‌های اولیه تا فوری امتحان شود (قابل حذف)
     products = [
@@ -715,6 +717,45 @@
     customers.forEach(function (c) { c.debt = custDebt(c); });
     suppliers.forEach(function (s) { s.debt = supDebt(s); });
   }
+  // ---------- صندوق نقد ----------
+  // مثل قرض‌ها، رقم صندوق هیچ‌جا ذخیره نمی‌شود؛ از رویدادها حساب می‌گردد:
+  //   موجودی اول + فروش نقد + دریافت از مشتری + پول دستی داخل + تعدیل شمارش
+  //   − خرید نقد − پرداخت به تامین‌کننده − مصارف خانه − پول دستی خارج
+  function cashOpeningEntry() {
+    var e = null;
+    cashEntries.forEach(function (x) { if (x.kind === "opening") e = x; });
+    return e;
+  }
+  function cashBreakdown() {
+    var op = cashOpeningEntry();
+    var b = { opening: op ? op.amount : 0, sales: 0, custPaid: 0,
+              purchasePaid: 0, supPaid: 0, expenses: 0,
+              manualIn: 0, manualOut: 0, adjust: 0 };
+    sales.forEach(function (s) { if (s.paymentType === "cash") b.sales += s.total; });
+    custPayments.forEach(function (p) { b.custPaid += p.amount; });
+    purchases.forEach(function (p) { b.purchasePaid += (p.paid || 0); });
+    supPayments.forEach(function (p) { b.supPaid += p.amount; });
+    expenses.forEach(function (e) { b.expenses += e.amount; });
+    cashEntries.forEach(function (e) {
+      if (e.kind === "in") b.manualIn += e.amount;
+      else if (e.kind === "out") b.manualOut += e.amount;
+      else if (e.kind === "count") b.adjust += e.amount;
+    });
+    Object.keys(b).forEach(function (k) { b[k] = +b[k].toFixed(2); });
+    return b;
+  }
+  function cashBalance() {
+    var b = cashBreakdown();
+    return +(b.opening + b.sales + b.custPaid + b.manualIn + b.adjust -
+             b.purchasePaid - b.supPaid - b.expenses - b.manualOut).toFixed(2);
+  }
+  // کلید روز شمسی، برای اینکه شمارش هر شب یکی باشد
+  function dayKeyOf(d) {
+    var j = toJalali(d); if (!j) return "";
+    var p = function (n) { return (n < 10 ? "0" + n : n); };
+    return j.jy + "/" + p(j.jm) + "/" + p(j.jd);
+  }
+
   // یک‌بار: «قرض قبلی» طوری حساب شود که رقم نشان‌داده‌شده هیچ تغییر نکند.
   function migrateDebtsToLedger() {
     var m = debtMaps(), changed = false;
@@ -2008,11 +2049,17 @@
     if (moreView === "wifi") { renderWifi(el); return; }
     if (moreView === "count") { renderCount(el); return; }
     if (moreView === "margins") { renderMargins(el); return; }
+    if (moreView === "cash") { renderCash(el); return; }
     if (moreView === "sync") { renderSync(el); return; }
     el.innerHTML =
       '<div class="menu-item" data-more="reports">' +
         '<div class="mico" style="background:var(--primary-soft);color:var(--primary)">📊</div>' +
         '<div class="mtx"><b>گزارش‌ها و فایده هر جنس</b><small>فروش، فایده، ضایعات، مصارف و قرض‌ها</small></div>' +
+        '<div class="chev">‹</div>' +
+      '</div>' +
+      '<div class="menu-item" data-more="cash">' +
+        '<div class="mico" style="background:var(--primary-soft);color:var(--primary)">💰</div>' +
+        '<div class="mtx"><b>صندوق</b><small>پول نقد موجود، شمارش شبانه و رد پول</small></div>' +
         '<div class="chev">‹</div>' +
       '</div>' +
       '<div class="menu-item" data-more="margins">' +
@@ -2067,7 +2114,7 @@
   function computeReport(period) {
     var start = periodStart(period);
     var r = { totalSales: 0, cash: 0, credit: 0, cogs: 0, wasteLoss: 0, expenses: 0, profit: 0, netProfit: 0,
-              cashIn: 0, cashOut: 0, cashBox: 0, estCogs: 0, estNames: {}, perProduct: {} };
+              cashIn: 0, cashOut: 0, cashBox: 0, cashShort: 0, estCogs: 0, estNames: {}, perProduct: {} };
     sales.forEach(function (s) {
       if (new Date(s.date) < start) return;
       r.totalSales += s.total;
@@ -2092,13 +2139,25 @@
     r.netProfit = r.profit - r.expenses;
 
     // صندوق نقد: پیسه‌ای که باید در دست باشد
-    // داخل = فروش نقد + دریافت از مشتری | خارج = پرداخت نقد فاکتور + پرداخت به تامین‌کننده + مصارف خانه
     r.cashIn = r.cash;
     custPayments.forEach(function (x) { if (new Date(x.date) >= start) r.cashIn += x.amount; });
     purchases.forEach(function (pu) { if (new Date(pu.date) >= start) r.cashOut += (pu.paid || 0); });
     supPayments.forEach(function (x) { if (new Date(x.date) >= start) r.cashOut += x.amount; });
     r.cashOut += r.expenses;
-    r.cashBox = r.cashIn - r.cashOut;
+    // رویدادهای خود صندوق: موجودی اول، پول دستی، و تعدیل شمارش
+    cashEntries.forEach(function (e) {
+      if (new Date(e.date) < start) return;
+      if (e.kind === "opening" || e.kind === "in") r.cashIn += e.amount;
+      else if (e.kind === "out") r.cashOut += e.amount;
+      else if (e.kind === "count") {
+        if (e.amount >= 0) r.cashIn += e.amount;
+        else { r.cashOut += -e.amount; r.cashShort += -e.amount; } // کسری = ضرر واقعی
+      }
+    });
+    r.cashBox = +(r.cashIn - r.cashOut).toFixed(2);
+    // کسری صندوق مثل کسری شمارش اجناس، از فایده کم می‌شود
+    r.profit = +(r.profit - r.cashShort).toFixed(2);
+    r.netProfit = +(r.profit - r.expenses).toFixed(2);
     return r;
   }
 
@@ -2156,6 +2215,7 @@
         '<div class="sumbox">' +
           row("قیمت تمام‌شد اجناس فروخته‌شده", r.cogs) +
           row("ضرر ضایعات", r.wasteLoss) +
+          (r.cashShort > 0 ? row("کسری صندوق", r.cashShort) : "") +
           '<div class="sumrow total"><span>فایدهٔ دوکان</span><span class="num" style="color:' + (r.profit >= 0 ? "var(--primary)" : "var(--danger)") + '">' + money(r.profit) + '</span></div>' +
         '</div>' +
         '<div class="sumbox">' +
@@ -2192,7 +2252,7 @@
 
   function collectData() {
     refreshDebtMirrors(); // فیلد debt فقط برای بک‌آپ تازه می‌شود
-    return { products: products, sales: sales, suppliers: suppliers, purchases: purchases, customers: customers, supPayments: supPayments, custPayments: custPayments, waste: waste, expenses: expenses, stockCounts: stockCounts };
+    return { products: products, sales: sales, suppliers: suppliers, purchases: purchases, customers: customers, supPayments: supPayments, custPayments: custPayments, waste: waste, expenses: expenses, stockCounts: stockCounts, cashEntries: cashEntries };
   }
   function applyData(d) {
     if (!d) return;
@@ -2206,8 +2266,10 @@
     if (d.waste) waste = d.waste;
     if (d.expenses) expenses = d.expenses;
     if (d.stockCounts) stockCounts = d.stockCounts;
+    if (d.cashEntries) cashEntries = d.cashEntries;
     save0(LS_P, products); save0(LS_S, sales); save0(LS_SUP, suppliers); save0(LS_PUR, purchases); save0(LS_CUST, customers);
     save0(LS_SPAY, supPayments); save0(LS_CPAY, custPayments); save0(LS_WASTE, waste); save0(LS_EXP, expenses); save0(LS_COUNTS, stockCounts);
+    save0(LS_CASH, cashEntries);
     // دیتای رسیده ممکن است از نسخهٔ کهنه باشد (بدون «قرض قبلی») — کوچ داده شود
     invalidateDebts();
     migrateMonthKeysToJalali();
@@ -2409,11 +2471,11 @@
   function wipeAll() {
     products = []; sales = []; suppliers = []; purchases = []; customers = [];
     supPayments = []; custPayments = []; waste = []; expenses = []; stockCounts = [];
-    cart = [];
+    cashEntries = []; cart = [];
     save0(LS_P, products); save0(LS_S, sales); save0(LS_SUP, suppliers);
     save0(LS_PUR, purchases); save0(LS_CUST, customers); save0(LS_SPAY, supPayments);
     save0(LS_CPAY, custPayments); save0(LS_WASTE, waste); save0(LS_EXP, expenses);
-    save0(LS_COUNTS, stockCounts);
+    save0(LS_COUNTS, stockCounts); save0(LS_CASH, cashEntries);
     localStorage.setItem(LS_SEED, "1"); // دیگر نمونهٔ آزمایشی ساخته نشود
     invalidateDebts();
     if (typeof syncOnLocalSave === "function") syncOnLocalSave(); // نسخهٔ آنلاین هم خالی شود
@@ -2513,6 +2575,185 @@
     renderMore(); renderProducts(); renderSaleGrid();
     toast(diffs === 0 ? "شمارش ثبت شد — هیچ فرقی نبود ✓"
       : ("شمارش ثبت شد — " + diffs + " قلم فرق داشت" + (shortLoss > 0 ? " • ضرر کسری: " + money(shortLoss) : "")));
+  }
+
+  // ---------- صفحهٔ صندوق ----------
+  // همهٔ حرکت‌های پول نقد، از هر منبعی، در یک فهرست (رد پول)
+  function cashMovements() {
+    var out = [];
+    sales.forEach(function (s) {
+      if (s.paymentType !== "cash") return;
+      out.push({ date: s.date, amount: s.total,
+        label: s.returnOf ? "برگشتی فروش نقد" : "فروش نقد" });
+    });
+    custPayments.forEach(function (p) {
+      var c = findC(p.customerId);
+      out.push({ date: p.date, amount: p.amount, label: "دریافت از " + (c ? c.name : "مشتری") });
+    });
+    purchases.forEach(function (p) {
+      if (!(p.paid > 0)) return;
+      out.push({ date: p.date, amount: -p.paid, label: "خرید نقد — " + (p.supplierName || "") });
+    });
+    supPayments.forEach(function (p) {
+      var s = findS(p.supplierId);
+      out.push({ date: p.date, amount: -p.amount, label: "پرداخت به " + (s ? s.name : "تامین‌کننده") });
+    });
+    expenses.forEach(function (e) {
+      out.push({ date: e.date, amount: -e.amount, label: "مصرف خانه" + (e.note ? " — " + e.note : "") });
+    });
+    cashEntries.forEach(function (e) {
+      if (e.kind === "opening") out.push({ date: e.date, amount: e.amount, label: "موجودی اول صندوق", opening: true });
+      else if (e.kind === "in") out.push({ date: e.date, amount: e.amount, label: "پول داخل شد" + (e.note ? " — " + e.note : "") });
+      else if (e.kind === "out") out.push({ date: e.date, amount: -e.amount, label: "پول خارج شد" + (e.note ? " — " + e.note : "") });
+      else if (e.kind === "count") out.push({ date: e.date, amount: e.amount,
+        label: (e.amount < 0 ? "کسری شمارش صندوق" : "زیادت شمارش صندوق") });
+    });
+    // کهنه به نو مرتب می‌شود تا مانده پی‌درپی حساب شود.
+    // «موجودی اول» همیشه اول می‌آید — چون نقطهٔ شروع دفتر است و تاریخ
+    // فاکتورها فقط روز دارد (نیمه‌شب)، ورنه پیش از آن می‌افتاد.
+    out.sort(function (a, b) {
+      if (a.opening !== b.opening) return a.opening ? -1 : 1;
+      return (a.date || "").localeCompare(b.date || "");
+    });
+    var run = 0;
+    out.forEach(function (m) { run = +(run + m.amount).toFixed(2); m.balance = run; });
+    return out.reverse(); // نو به کهنه برای نمایش
+  }
+
+  function renderCash(el) {
+    var head = '<div class="subhead"><button class="back moreBack" aria-label="بازگشت">→</button><h3>صندوق</h3></div>';
+    var bal = cashBalance();
+    var b = cashBreakdown();
+    var hasOpening = !!cashOpeningEntry();
+
+    var openingBtn = hasOpening ? "" :
+      '<div class="warn-card" style="background:var(--credit-soft);border-color:var(--credit)">' +
+      '<div class="wi">💰</div><div class="wtx"><b>موجودی اول صندوق ثبت نشده</b>' +
+      '<small style="color:var(--credit)">امشب پول صندوق را بشمارید و همان را اینجا بگذارید — تا رقم‌ها از اول درست باشد.</small></div></div>' +
+      '<div style="padding:0 14px 6px"><button class="addline" id="setOpeningBtn" style="margin:0;border-color:var(--credit);background:var(--credit-soft);color:var(--credit)">＋ ثبت موجودی اول صندوق</button></div>';
+
+    var moves = cashMovements();
+    var moveHtml = moves.length === 0
+      ? '<p style="color:var(--ink-soft);text-align:center;padding:10px;font-size:14px">هنوز حرکتی نیست</p>'
+      : moves.slice(0, 60).map(function (m) {
+          var col = m.amount < 0 ? "var(--danger)" : "var(--primary)";
+          var sign = m.amount < 0 ? "−" : "＋";
+          return '<div class="iline"><div class="in"><b>' + esc(m.label) + '</b>' +
+            '<small class="num">' + fmtDate(m.date) + ' • مانده: ' + money(m.balance) + '</small></div>' +
+            '<div class="lt num" style="color:' + col + '">' + sign + ' ' + money(Math.abs(m.amount)) + '</div></div>';
+        }).join("");
+
+    el.innerHTML = head + openingBtn +
+      '<div style="padding:6px 14px 0">' +
+        '<div class="sumbox" style="text-align:center;padding:16px">' +
+          '<div style="font-size:15px;color:var(--ink-soft);font-weight:700">پول در صندوق</div>' +
+          '<div class="num" style="font-size:34px;font-weight:900;color:' + (bal < 0 ? "var(--danger)" : "var(--primary)") + ';margin-top:4px">' + money(bal) + '</div>' +
+          '<div style="font-size:12.5px;color:var(--ink-soft);margin-top:4px">باید همین‌قدر در جعبه باشد</div>' +
+        '</div>' +
+        '<div style="display:flex;gap:8px;margin-bottom:12px">' +
+          '<button class="wbtn" id="cashCountBtn" style="flex:1 1 0;padding:12px;background:var(--primary)">🌙 شمارش صندوق</button>' +
+        '</div>' +
+        '<div style="display:flex;gap:8px;margin-bottom:14px">' +
+          '<button class="wbtn" id="cashInBtn" style="flex:1 1 0;padding:11px;background:var(--primary)">＋ پول داخل</button>' +
+          '<button class="wbtn" id="cashOutBtn" style="flex:1 1 0;padding:11px;background:var(--danger)">− پول خارج</button>' +
+        '</div>' +
+        '<div class="sumbox">' +
+          '<div class="sumrow"><span>موجودی اول</span><span class="num">' + money(b.opening) + '</span></div>' +
+          '<div class="sumrow"><span>فروش نقد</span><span class="num">＋ ' + money(b.sales) + '</span></div>' +
+          '<div class="sumrow"><span>دریافت از مشتری</span><span class="num">＋ ' + money(b.custPaid) + '</span></div>' +
+          (b.manualIn ? '<div class="sumrow"><span>پول دستی داخل</span><span class="num">＋ ' + money(b.manualIn) + '</span></div>' : '') +
+          '<div class="sumrow"><span>خرید نقد</span><span class="num">− ' + money(b.purchasePaid) + '</span></div>' +
+          '<div class="sumrow"><span>پرداخت به تامین‌کننده</span><span class="num">− ' + money(b.supPaid) + '</span></div>' +
+          '<div class="sumrow"><span>مصارف خانه</span><span class="num">− ' + money(b.expenses) + '</span></div>' +
+          (b.manualOut ? '<div class="sumrow"><span>پول دستی خارج</span><span class="num">− ' + money(b.manualOut) + '</span></div>' : '') +
+          (b.adjust ? '<div class="sumrow"><span>تعدیل شمارش</span><span class="num">' + (b.adjust < 0 ? "− " : "＋ ") + money(Math.abs(b.adjust)) + '</span></div>' : '') +
+          '<div class="sumrow total"><span>پول در صندوق</span><span class="num">' + money(bal) + '</span></div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="listhead">رد پول (تازه‌ترین اول)</div>' + moveHtml;
+  }
+
+  // شمارش شبانه — یک شمارش برای هر روز؛ شمارش دوباره جای قبلی را می‌گیرد
+  function openCashCount() {
+    var expected = cashBalance();
+    openSheet(
+      '<h2>🌙 شمارش صندوق</h2>' +
+      '<div class="sumbox"><div class="sumrow total"><span>باید باشد</span><span class="num">' + money(expected) + '</span></div></div>' +
+      '<div class="field"><label>پولی که شمردید (افغانی)</label>' +
+        '<input id="ccAmt" type="number" inputmode="decimal" step="any" min="0" placeholder="0" /></div>' +
+      '<div id="ccOut" style="margin:-4px 0 12px;font-size:15px;font-weight:800"></div>' +
+      '<p style="color:var(--ink-soft);font-size:13px;margin:0 0 12px;line-height:1.9">' +
+        'اگر کم باشد، «کسری صندوق» ثبت می‌شود و از فایده کم می‌گردد.<br>' +
+        'اگر زیاد باشد، فقط رقم صندوق درست می‌شود و فایدهٔ ساختگی نمی‌سازد.</p>' +
+      '<div class="actions"><button class="ghost" data-close>لغو</button>' +
+        '<button class="primary" id="ccOk">ثبت شمارش</button></div>'
+    );
+    function refresh() {
+      var v = parseFloat($("#ccAmt").value);
+      var out = $("#ccOut");
+      if ($("#ccAmt").value === "" || isNaN(v)) { out.textContent = ""; return; }
+      var d = +(v - expected).toFixed(2);
+      if (d === 0) out.innerHTML = '<span style="color:var(--primary)">✓ دقیق جور است</span>';
+      else if (d < 0) out.innerHTML = '<span style="color:var(--danger)">⚠️ ' + money(-d) + ' کم است</span>';
+      else out.innerHTML = '<span style="color:var(--credit)">' + money(d) + ' زیاد است</span>';
+    }
+    $("#ccAmt").addEventListener("input", refresh);
+    $("#ccOk").addEventListener("click", function () {
+      var v = parseFloat($("#ccAmt").value);
+      if ($("#ccAmt").value === "" || isNaN(v) || v < 0) { toast("مبلغ شمرده‌شده را بنویسید", true); return; }
+      var dk = dayKeyOf(new Date());
+      // شمارش قبلی همین روز برداشته شود تا تعدیل دوبار حساب نگردد
+      cashEntries = cashEntries.filter(function (e) { return !(e.kind === "count" && e.dayKey === dk); });
+      var expectedNow = cashBalance(); // بعد از برداشتن شمارش قبلی همین روز
+      var diff = +(v - expectedNow).toFixed(2);
+      if (diff !== 0) {
+        cashEntries.push({ id: id(), date: new Date().toISOString(), kind: "count",
+          amount: diff, dayKey: dk, counted: v, expected: expectedNow });
+      }
+      save(LS_CASH, cashEntries);
+      closeSheet(); renderMore();
+      buzz(30);
+      toast(diff === 0 ? "شمارش ثبت شد — دقیق جور بود ✓"
+        : (diff < 0 ? "کسری " + money(-diff) + " ثبت شد" : "زیادت " + money(diff) + " ثبت شد"));
+    });
+    setTimeout(function () { $("#ccAmt").focus(); }, 60);
+  }
+
+  // پول دستی داخل/خارج + موجودی اول
+  function openCashEntry(kind) {
+    var isIn = kind === "in", isOpening = kind === "opening";
+    var title = isOpening ? "موجودی اول صندوق" : (isIn ? "＋ پول داخل صندوق" : "− پول خارج از صندوق");
+    var hint = isOpening
+      ? 'پولی که همین حالا در صندوق دارید. این نقطهٔ شروع دفتر صندوق است.'
+      : (isIn ? 'مثلاً: از خانه آوردم، سرمایهٔ نو.'
+              : '<b style="color:var(--danger)">خرچ خانه را اینجا ننویسید</b> — آن را در «مصارف خانه» ثبت کنید، ورنه دوبار کم می‌شود.<br>اینجا برای: به بانک بردم، به کسی قرض دادم، و مانند آن.');
+    openSheet(
+      '<h2>' + title + '</h2>' +
+      '<p style="margin:-6px 0 12px;color:var(--ink-soft);font-size:13.5px;line-height:1.9">' + hint + '</p>' +
+      '<div class="field"><label>مبلغ (افغانی)</label>' +
+        '<input id="ceAmt" type="number" inputmode="decimal" step="any" min="0" placeholder="0" /></div>' +
+      (isOpening ? '' :
+        '<div class="field"><label>توضیح (اختیاری)</label>' +
+        '<input id="ceNote" type="text" placeholder="مثلاً: از خانه" /></div>') +
+      '<div class="actions"><button class="ghost" data-close>لغو</button>' +
+        '<button class="primary" id="ceOk">ثبت</button></div>'
+    );
+    $("#ceOk").addEventListener("click", function () {
+      var v = parseFloat($("#ceAmt").value);
+      if (!(v > 0)) { toast("مبلغ را درست بنویسید", true); return; }
+      if (isOpening) {
+        // موجودی اول یکی است؛ اگر بود، جای‌گزین می‌شود
+        cashEntries = cashEntries.filter(function (e) { return e.kind !== "opening"; });
+        cashEntries.push({ id: id(), date: new Date().toISOString(), kind: "opening", amount: v });
+      } else {
+        cashEntries.push({ id: id(), date: new Date().toISOString(), kind: kind,
+          amount: v, note: ($("#ceNote") ? $("#ceNote").value.trim() : "") });
+      }
+      save(LS_CASH, cashEntries);
+      closeSheet(); renderMore();
+      toast("ثبت شد ✓");
+    });
+    setTimeout(function () { $("#ceAmt").focus(); }, 60);
   }
 
   // ---------- بازبینی نرخ‌ها ----------
@@ -2960,6 +3201,10 @@
     if (e.target.closest(".moreBack")) { moreView = null; renderMore(); return; }
     if (e.target.closest("#newWasteBtn")) { openWastePicker(); return; }
     if (e.target.closest("#groupPriceBtn")) { openGroupPrice(); return; }
+    if (e.target.closest("#cashCountBtn")) { openCashCount(); return; }
+    if (e.target.closest("#cashInBtn")) { openCashEntry("in"); return; }
+    if (e.target.closest("#cashOutBtn")) { openCashEntry("out"); return; }
+    if (e.target.closest("#setOpeningBtn")) { openCashEntry("opening"); return; }
     var me = e.target.closest("[data-medit]");
     if (me) { var mp = findP(me.dataset.medit); if (mp) openMarginEdit(mp); return; }
     var w = e.target.closest("[data-wexp]"); if (w) { var p = findP(w.dataset.wexp); if (p) openWasteForm(p, "expired"); return; }

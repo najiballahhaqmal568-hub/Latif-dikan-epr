@@ -139,6 +139,19 @@
     font-size: 22px; line-height: 1; padding: 6px; cursor: pointer;
   }
 
+  /* نوار نرخ‌ها بالای اجناس — در شلوغی نرخ زودتر از نام به یاد می‌آید */
+  .pricebar {
+    display: flex; gap: 7px; padding: 4px 14px 2px; overflow-x: auto;
+    -webkit-overflow-scrolling: touch; scrollbar-width: none;
+  }
+  .pricebar::-webkit-scrollbar { display: none; }
+  .pricebar button {
+    flex: 0 0 auto; border: 2px solid var(--line); background: var(--surface); color: var(--ink);
+    font: inherit; font-size: 15px; font-weight: 800; padding: 7px 14px;
+    border-radius: 999px; cursor: pointer; white-space: nowrap;
+  }
+  .pricebar button.on { background: var(--primary); color: var(--primary-ink); border-color: var(--primary); }
+
   /* Product grid (sales) */
   .grid {
     display: grid;
@@ -506,6 +519,7 @@
         </div>
         <button class="todaybtn" id="btnTodaySales" title="فروش‌های امروز">🧾</button>
       </div>
+      <div class="pricebar" id="priceBar"></div>
       <div class="grid" id="saleGrid"></div>
     </section>
 
@@ -853,9 +867,30 @@
   }
 
   // ---------- Sales grid ----------
+  // نوار نرخ‌ها: از روی نرخ‌های خود اجناس ساخته می‌شود (بدون تنظیم)
+  var priceFilter = null;
+  function renderPriceBar() {
+    var bar = $("#priceBar"); if (!bar) return;
+    var counts = {};
+    products.forEach(function (p) { if (p.sell > 0) counts[p.sell] = (counts[p.sell] || 0) + 1; });
+    var list = Object.keys(counts).map(parseFloat).sort(function (a, b) { return a - b; });
+    // اگر نرخ‌ها خیلی کم است، نوار فایده‌ای ندارد
+    if (list.length < 2) { bar.innerHTML = ""; bar.style.display = "none"; return; }
+    bar.style.display = "flex";
+    bar.innerHTML = '<button data-pf="all" class="' + (priceFilter === null ? "on" : "") + '">همه</button>' +
+      list.map(function (v) {
+        return '<button data-pf="' + v + '" class="' + (priceFilter === v ? "on" : "") + '">' + nf.format(v) + '</button>';
+      }).join("");
+  }
+
   function renderSaleGrid() {
+    renderPriceBar();
     var q = $("#search").value.trim().toLowerCase();
-    var list = products.filter(function (p) { return !q || p.name.toLowerCase().indexOf(q) !== -1; });
+    var list = products.filter(function (p) {
+      if (q && p.name.toLowerCase().indexOf(q) === -1) return false;
+      if (priceFilter !== null && p.sell !== priceFilter) return false;
+      return true;
+    });
     var g = $("#saleGrid");
     if (products.length === 0) {
       g.innerHTML = '<div class="empty" style="grid-column:1/-1"><div class="big">📦</div><p>هنوز جنسی ثبت نشده.<br>از بخش «اجناس» جنس اضافه کنید.</p></div>';
@@ -1212,6 +1247,18 @@
   }
 
   // Add / edit product form
+  // نرخ‌های رایج: اول از روی نرخ‌های خود دوکان، و اگر کم بود از نرخ‌های معمول
+  function commonSellPrices() {
+    var counts = {};
+    products.forEach(function (p) { if (p.sell > 0) counts[p.sell] = (counts[p.sell] || 0) + 1; });
+    var mine = Object.keys(counts).map(parseFloat)
+      .sort(function (a, b) { return counts[b] - counts[a] || a - b; })
+      .slice(0, 8);
+    var defaults = [1, 5, 10, 20, 30, 40, 50, 60];
+    defaults.forEach(function (v) { if (mine.length < 8 && mine.indexOf(v) === -1) mine.push(v); });
+    return mine.sort(function (a, b) { return a - b; });
+  }
+
   function openProductForm(existing) {
     var p = existing || { name: "", type: "unit", unit: "piece", buy: "", sell: "", qty: "", expiry: "" };
     var editing = !!existing;
@@ -1249,6 +1296,13 @@
       '</div>' +
       '<div class="field"><label id="lSell">قیمت فروش (افغانی)</label>' +
         '<input id="fSell" type="number" inputmode="decimal" step="any" min="0" value="' + p.sell + '" placeholder="0" />' +
+        // نرخ‌های رایج این دوکان — از روی اجناس موجود ساخته می‌شود
+        '<div class="chips" id="sellPresets" style="flex-wrap:wrap;margin-top:8px">' +
+          commonSellPrices().map(function (v) {
+            return '<button type="button" data-sp="' + v + '" style="flex:0 1 auto;padding:8px 14px">' + nf.format(v) + '</button>';
+          }).join("") +
+        '</div>' +
+        '<small id="fMargin" style="display:block;margin-top:8px;font-size:13.5px;color:var(--ink-soft)"></small>' +
         '<div class="err" id="eSell">قیمت فروش را درست بنویسید</div></div>' +
       '<div class="field"><label id="lQty">تعداد موجود</label>' +
         '<input id="fQty" type="number" inputmode="decimal" step="any" min="0" value="' + p.qty + '" placeholder="0" /></div>' +
@@ -1312,9 +1366,32 @@
       } else {
         $("#cOut").textContent = "فی دانه: —";
       }
+      refreshMargin(); // فایده با قیمت خرید نو تازه شود
     }
     $("#cPrice").addEventListener("input", calcCarton);
     $("#cCount").addEventListener("input", calcCarton);
+
+    // نرخ‌های آماده + نشان‌دادن زندهٔ فایده
+    function refreshMargin() {
+      var b = parseFloat($("#fBuy").value) || 0;
+      var s = parseFloat($("#fSell").value);
+      var out = $("#fMargin");
+      if (!(s > 0)) { out.textContent = ""; return; }
+      var m = +(s - b).toFixed(3);
+      var pct = Math.round((m / s) * 100);
+      var col = m <= 0 ? "var(--danger)" : (pct < 10 ? "var(--credit)" : "var(--primary)");
+      out.innerHTML = 'فایدهٔ فی دانه: <b style="color:' + col + '">' + money(m) + '</b> (' + pct + '٪)' +
+        (m <= 0 ? ' — <b style="color:var(--danger)">در ضرر!</b>' : '');
+    }
+    refreshMargin();
+    $("#fBuy").addEventListener("input", refreshMargin);
+    $("#fSell").addEventListener("input", refreshMargin);
+    $("#sellPresets").addEventListener("click", function (e) {
+      var b = e.target.closest("[data-sp]"); if (!b) return;
+      $("#fSell").value = b.dataset.sp;
+      $("#eSell").classList.remove("show");
+      refreshMargin(); buzz();
+    });
     $("#fSave").addEventListener("click", function () {
       var name = $("#fName").value.trim();
       var sell = parseFloat($("#fSell").value);
@@ -1564,6 +1641,96 @@
     setTimeout(function () { $("#npName").focus(); }, 60);
   }
 
+  // ---------- سنجش فایدهٔ فی دانه ----------
+  function margin(p) { return +(((p.sell || 0) - (p.buy || 0))).toFixed(3); }
+  function marginPct(p) {
+    if (!(p.sell > 0)) return null;
+    return Math.round((((p.sell - (p.buy || 0)) / p.sell) * 100));
+  }
+
+  // آیا بعد از این خرید، نرخ فروش این جنس مشکل دارد؟
+  // «ضرر» = قیمت خرید از فروش بیشتر یا برابر شد.
+  // «فایده کم شد» = فایده نسبت به پیش از خرید بیش از ۱۰٪ پایین آمد.
+  function marginAlert(p, oldBuy, isBrandNew, wasEstimated) {
+    if (!(p.sell > 0)) return null; // هنوز نرخ فروش ندارد
+    var newM = p.sell - (p.buy || 0);
+    var oldM = p.sell - (oldBuy || 0);
+    var isLoss = newM <= 0;
+    var drop = oldM - newM;
+    var isThin = !isLoss && !isBrandNew && oldM > 0 && drop > 0 && (drop / oldM) >= 0.1;
+    if (!isLoss && !isThin) return null;
+    return {
+      productId: p.id, name: p.name,
+      oldBuy: +(oldBuy || 0).toFixed(3), newBuy: +(p.buy || 0).toFixed(3),
+      sell: p.sell,
+      oldMargin: +oldM.toFixed(3), newMargin: +newM.toFixed(3),
+      loss: isLoss, wasEstimated: !!wasEstimated
+    };
+  }
+
+  // شیت اخطار نرخ — همان‌جا می‌شود نرخ فروش را درست کرد
+  function openPriceAlerts(alerts) {
+    var rows = alerts.map(function (a) {
+      var col = a.loss ? "var(--danger)" : "var(--credit)";
+      var head = a.loss ? "🔴 در ضرر می‌فروشید!" : "⚠️ فایده کم شد";
+      return '<div style="border:2px solid ' + col + ';border-radius:12px;padding:12px;margin-bottom:10px">' +
+        '<b style="color:' + col + '">' + head + '</b>' +
+        '<div style="font-size:16px;font-weight:800;margin:6px 0 2px">' + esc(a.name) + '</div>' +
+        '<small style="color:var(--ink-soft);line-height:1.9;display:block">' +
+          'قیمت خرید: ' + money(a.oldBuy) + ' ← <b>' + money(a.newBuy) + '</b>' +
+          (a.wasEstimated ? ' <span class="estbadge">تخمین درست شد</span>' : '') + '<br>' +
+          'قیمت فروش فعلی: <b>' + money(a.sell) + '</b><br>' +
+          'فایدهٔ فی دانه: ' + money(a.oldMargin) + ' ← <b style="color:' + col + '">' + money(a.newMargin) + '</b>' +
+        '</small>' +
+        '<div style="display:flex;gap:8px;align-items:center;margin-top:10px">' +
+          '<input type="number" inputmode="decimal" step="any" min="0" data-newsell="' + a.productId + '" value="' + a.sell + '" ' +
+            'style="flex:1 1 0;min-width:0;font:inherit;font-size:17px;font-weight:800;padding:9px;border:2px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink)" />' +
+          '<small style="flex:0 0 auto;color:var(--ink-soft);font-size:12.5px">نرخ فروش نو</small>' +
+        '</div>' +
+        '<small data-newmargin="' + a.productId + '" style="display:block;margin-top:6px;color:var(--ink-soft);font-size:13px"></small>' +
+        '</div>';
+    }).join("");
+
+    openSheet(
+      '<h2>بازبینی نرخ فروش</h2>' +
+      '<p style="margin:-6px 0 12px;color:var(--ink-soft);font-size:13.5px">فاکتور ثبت شد ✓ ولی قیمت خرید این اجناس بالا رفته. اگر می‌خواهید، نرخ فروش را همین‌جا درست کنید.</p>' +
+      '<div style="max-height:52vh;overflow-y:auto">' + rows + '</div>' +
+      '<div class="actions"><button class="ghost" data-close>فعلاً نی</button>' +
+        '<button class="primary" id="savePrices">💾 ذخیرهٔ نرخ‌ها</button></div>'
+    );
+
+    function refreshMargins() {
+      alerts.forEach(function (a) {
+        var inp = sheet.querySelector('[data-newsell="' + a.productId + '"]');
+        var out = sheet.querySelector('[data-newmargin="' + a.productId + '"]');
+        if (!inp || !out) return;
+        var s = parseFloat(inp.value);
+        if (!(s > 0)) { out.textContent = ""; return; }
+        var m = +(s - a.newBuy).toFixed(3);
+        var pct = Math.round((m / s) * 100);
+        out.innerHTML = 'فایدهٔ نو: <b style="color:' + (m > 0 ? "var(--primary)" : "var(--danger)") + '">' +
+          money(m) + '</b> (' + pct + '٪)';
+      });
+    }
+    refreshMargins();
+    sheet.querySelectorAll("[data-newsell]").forEach(function (i) {
+      i.addEventListener("input", refreshMargins);
+    });
+    $("#savePrices").addEventListener("click", function () {
+      var n = 0;
+      alerts.forEach(function (a) {
+        var inp = sheet.querySelector('[data-newsell="' + a.productId + '"]');
+        if (!inp) return;
+        var s = parseFloat(inp.value);
+        var p = findP(a.productId);
+        if (p && s > 0 && s !== p.sell) { p.sell = s; n++; }
+      });
+      if (n) { save(LS_P, products); renderProducts(); renderSaleGrid(); }
+      closeSheet();
+      toast(n ? ("نرخ " + n + " جنس تازه شد ✓") : "نرخی تغییر نکرد");
+    });
+  }
+
   function savePurchase() {
     syncDraftInputs();
     var name = (draft.supplierName || "").trim();
@@ -1582,16 +1749,20 @@
     if (!sup) { sup = { id: id(), name: name, phone: draft.phone || "", debt: 0 }; suppliers.push(sup); }
     else if (draft.phone && !sup.phone) sup.phone = draft.phone;
 
+    var priceAlerts = []; // اجناسی که بعد از این خرید فایده‌شان کم/منفی شد
     validLines.forEach(function (l) {
       // جنس نو: اول در اجناس ثبت شود (تعداد ۰، بعد از حلقه پایین زیاد می‌شود)
+      var isBrandNew = false;
       if (l.isNew && !findP(l.productId)) {
         products.push({ id: l.productId, name: l.name, type: l.type || "unit", unit: l.unit, buy: l.buyPrice, sell: l.sellPrice || 0, qty: 0, expiry: "" });
+        isBrandNew = true;
       }
       var p = findP(l.productId);
       if (!p) return;
       // قیمت خرید = اوسط وزنی موجودی کهنه و خرید نو (اگر موجودی نبود، قیمت نو)
       var oldQty = p.qty > 0 ? p.qty : 0;
       var oldBuy = p.buy || 0;
+      var wasEstimated = !!p.buyEstimated;
       // اگر قیمت کهنه تخمینی بود، دیگر با آن اوسط گرفته نمی‌شود —
       // قیمت واقعی این خرید جای آن را می‌گیرد و نشان «تخمینی» برداشته می‌شود.
       if (p.buyEstimated) {
@@ -1601,6 +1772,10 @@
         p.buy = oldQty > 0 ? +(((oldQty * oldBuy) + (l.qty * l.buyPrice)) / (oldQty + l.qty)).toFixed(2) : l.buyPrice;
       }
       p.qty = +(p.qty + l.qty).toFixed(3);
+
+      // سنجش فایده بعد از خرید — تا ضرر خاموش پنهان نماند
+      var a = marginAlert(p, oldBuy, isBrandNew, wasEstimated);
+      if (a) priceAlerts.push(a);
     });
     // قرض تامین‌کننده جدا زیاد نمی‌شود؛ «باقی‌ماندهٔ» خودِ فاکتور رویداد آن است
 
@@ -1614,6 +1789,8 @@
     draft = null; closeSheet();
     renderPurchases(); renderSuppliers(); renderProducts(); renderSaleGrid();
     toast("فاکتور خرید ثبت شد ✓ موجودی زیاد شد");
+    // فاکتور ثبت شد؛ حالا اگر نرخ فروشی مشکل دارد، همان‌جا نشان داده شود
+    if (priceAlerts.length) setTimeout(function () { openPriceAlerts(priceAlerts); }, 350);
   }
 
   // ---------- Suppliers (قرض تامین‌کننده) ----------
@@ -1830,11 +2007,17 @@
     if (moreView === "reports") { renderReports(el); return; }
     if (moreView === "wifi") { renderWifi(el); return; }
     if (moreView === "count") { renderCount(el); return; }
+    if (moreView === "margins") { renderMargins(el); return; }
     if (moreView === "sync") { renderSync(el); return; }
     el.innerHTML =
       '<div class="menu-item" data-more="reports">' +
         '<div class="mico" style="background:var(--primary-soft);color:var(--primary)">📊</div>' +
         '<div class="mtx"><b>گزارش‌ها و فایده هر جنس</b><small>فروش، فایده، ضایعات، مصارف و قرض‌ها</small></div>' +
+        '<div class="chev">‹</div>' +
+      '</div>' +
+      '<div class="menu-item" data-more="margins">' +
+        '<div class="mico" style="background:var(--credit-soft);color:var(--credit)">📋</div>' +
+        '<div class="mtx"><b>بازبینی نرخ‌ها</b><small>فایدهٔ هر جنس — کم‌فایده‌ترین‌ها اول</small></div>' +
         '<div class="chev">‹</div>' +
       '</div>' +
       '<div class="menu-item" data-more="wifi">' +
@@ -2332,6 +2515,148 @@
       : ("شمارش ثبت شد — " + diffs + " قلم فرق داشت" + (shortLoss > 0 ? " • ضرر کسری: " + money(shortLoss) : "")));
   }
 
+  // ---------- بازبینی نرخ‌ها ----------
+  // فهرست اجناس با فایدهٔ فی دانه — کم‌فایده‌ترین اول، تا معلوم شود
+  // کدام نرخ فروش باید بالا برود (نه بر اساس گروه نرخ، بلکه بر اساس فایده).
+  function renderMargins(el) {
+    var head = '<div class="subhead"><button class="back moreBack" aria-label="بازگشت">→</button><h3>بازبینی نرخ‌ها</h3></div>';
+    var priced = products.filter(function (p) { return p.sell > 0; });
+    if (priced.length === 0) {
+      el.innerHTML = head + '<div class="empty"><div class="big">📋</div><p>هنوز جنسی با نرخ فروش نیست.</p></div>';
+      return;
+    }
+    var sorted = priced.slice().sort(function (a, b) {
+      var ma = marginPct(a), mb = marginPct(b);
+      if (ma !== mb) return ma - mb;       // کم‌فایده‌ترین اول
+      return a.name.localeCompare(b.name, "fa");
+    });
+    var lossCount = 0, thinCount = 0;
+    var rows = sorted.map(function (p) {
+      var m = margin(p), pct = marginPct(p);
+      var col, tag = "";
+      if (m <= 0) { col = "var(--danger)"; tag = ' <span class="retbadge">در ضرر</span>'; lossCount++; }
+      else if (pct < 10) { col = "var(--credit)"; tag = ' <span class="estbadge">فایدهٔ خیلی کم</span>'; thinCount++; }
+      else col = "var(--primary)";
+      return '<div class="iline">' +
+        '<button class="wbtn" data-medit="' + p.id + '" style="background:var(--credit)">تغییر نرخ</button>' +
+        '<div class="in"><b>' + esc(p.name) + tag + '</b>' +
+        '<small class="num">خرید: ' + money(p.buy || 0) + ' • فروش: ' + money(p.sell) + '</small></div>' +
+        '<div class="lt num" style="color:' + col + '">' + money(m) + '<br><small style="font-size:11.5px">' + pct + '٪</small></div>' +
+        '</div>';
+    }).join("");
+
+    var warn = "";
+    if (lossCount > 0) {
+      warn = '<div class="warn-card"><div class="wi">🔴</div><div class="wtx"><b>' + lossCount +
+        ' جنس در ضرر فروخته می‌شود</b><small>قیمت خریدشان از قیمت فروش بیشتر است — نرخ‌شان را بالا ببرید.</small></div></div>';
+    } else if (thinCount > 0) {
+      warn = '<div class="warn-card" style="background:var(--credit-soft);border-color:var(--credit)"><div class="wi">⚠️</div>' +
+        '<div class="wtx"><b>' + thinCount + ' جنس فایدهٔ خیلی کم دارد</b><small style="color:var(--credit)">کمتر از ۱۰٪ فایده.</small></div></div>';
+    }
+
+    el.innerHTML = head +
+      '<p style="color:var(--ink-soft);font-size:13px;padding:4px 16px 6px">فایدهٔ فی دانه = قیمت فروش − قیمت خرید. کم‌فایده‌ترین اجناس در بالا هستند.</p>' +
+      warn +
+      '<div style="padding:0 14px 4px"><button class="addline" id="groupPriceBtn" style="margin:0">☑️ تغییر نرخ گروهی (با انتخاب خودتان)</button></div>' +
+      '<div class="listhead">فایدهٔ هر جنس</div>' + rows;
+  }
+
+  // تغییر نرخ گروهی — ولی هر جنس جدا تیک می‌خورد، چون قیمت خرید
+  // اجناس هم‌نرخ فرق می‌کند و کورکورانه تغییردادن غلط است.
+  function openGroupPrice() {
+    var prices = {};
+    products.forEach(function (p) { if (p.sell > 0) prices[p.sell] = (prices[p.sell] || 0) + 1; });
+    var list = Object.keys(prices).map(parseFloat).sort(function (a, b) { return a - b; });
+    if (list.length === 0) { toast("هنوز جنسی با نرخ فروش نیست", true); return; }
+    openSheet(
+      '<h2>تغییر نرخ گروهی</h2>' +
+      '<p style="margin:-6px 0 12px;color:var(--ink-soft);font-size:13.5px">اول نرخ فعلی را انتخاب کنید.</p>' +
+      '<div class="chips" id="grpPrices" style="flex-wrap:wrap">' +
+        list.map(function (v) {
+          return '<button type="button" data-gp="' + v + '" style="flex:0 1 auto;padding:9px 14px">' +
+            money(v) + ' <small style="color:var(--ink-soft)">(' + prices[v] + ')</small></button>';
+        }).join("") +
+      '</div>' +
+      '<div class="actions"><button class="ghost" data-close>لغو</button></div>'
+    );
+    $("#grpPrices").addEventListener("click", function (e) {
+      var b = e.target.closest("[data-gp]"); if (!b) return;
+      openGroupPriceStep2(parseFloat(b.dataset.gp));
+    });
+  }
+
+  function openGroupPriceStep2(oldPrice) {
+    var group = products.filter(function (p) { return p.sell === oldPrice; })
+      .sort(function (a, b) { return a.name.localeCompare(b.name, "fa"); });
+    openSheet(
+      '<h2>نرخ ' + money(oldPrice) + ' → ؟</h2>' +
+      '<div class="field"><label>نرخ فروش نو (افغانی)</label>' +
+        '<input id="gpNew" type="number" inputmode="decimal" step="any" min="0" placeholder="0" /></div>' +
+      '<p style="color:var(--ink-soft);font-size:13px;margin:-4px 0 8px">قیمت خرید هر جنس فرق می‌کند، پس تیک هرکدام را که نمی‌خواهید بردارید.</p>' +
+      '<div style="max-height:42vh;overflow-y:auto">' +
+        group.map(function (p) {
+          var m = margin(p);
+          return '<label class="estrow" style="border-bottom:1px solid var(--line);padding-bottom:9px;margin-top:9px">' +
+            '<input type="checkbox" data-gpp="' + p.id + '" checked />' +
+            '<span style="flex:1 1 auto"><b>' + esc(p.name) + '</b><br>' +
+            '<small style="color:var(--ink-soft)" class="num">خرید ' + money(p.buy || 0) + ' • فایدهٔ فعلی ' + money(m) + '</small></span>' +
+            '</label>';
+        }).join("") +
+      '</div>' +
+      '<div class="actions"><button class="ghost" data-close>لغو</button>' +
+        '<button class="primary" id="gpApply">تغییر نرخ</button></div>'
+    );
+    $("#gpApply").addEventListener("click", function () {
+      var v = parseFloat($("#gpNew").value);
+      if (!(v > 0)) { toast("نرخ نو را بنویسید", true); return; }
+      var n = 0;
+      sheet.querySelectorAll("[data-gpp]").forEach(function (cb) {
+        if (!cb.checked) return;
+        var p = findP(cb.dataset.gpp);
+        if (p) { p.sell = v; n++; }
+      });
+      if (n === 0) { toast("هیچ جنسی انتخاب نشده", true); return; }
+      save(LS_P, products);
+      closeSheet(); renderMore(); renderProducts(); renderSaleGrid();
+      toast("نرخ " + n + " جنس به " + money(v) + " تغییر کرد ✓");
+    });
+    setTimeout(function () { $("#gpNew").focus(); }, 60);
+  }
+
+  // تغییر نرخ یک جنس از صفحهٔ بازبینی
+  function openMarginEdit(p) {
+    openSheet(
+      '<h2>نرخ فروش ' + esc(p.name) + '</h2>' +
+      '<div class="sumbox">' +
+        '<div class="sumrow"><span>قیمت خرید</span><span class="num">' + money(p.buy || 0) + '</span></div>' +
+        '<div class="sumrow"><span>قیمت فروش فعلی</span><span class="num">' + money(p.sell) + '</span></div>' +
+        '<div class="sumrow total"><span>فایدهٔ فی ' + unitLabel(p.unit) + '</span><span class="num">' + money(margin(p)) + ' (' + marginPct(p) + '٪)</span></div>' +
+      '</div>' +
+      '<div class="field"><label>نرخ فروش نو (افغانی)</label>' +
+        '<input id="meSell" type="number" inputmode="decimal" step="any" min="0" value="' + p.sell + '" /></div>' +
+      '<small id="meOut" style="display:block;margin:-6px 0 12px;color:var(--ink-soft);font-size:13.5px"></small>' +
+      '<div class="actions"><button class="ghost" data-close>لغو</button>' +
+        '<button class="primary" id="meOk">💾 ذخیره</button></div>'
+    );
+    function refresh() {
+      var s = parseFloat($("#meSell").value);
+      if (!(s > 0)) { $("#meOut").textContent = ""; return; }
+      var m = +(s - (p.buy || 0)).toFixed(3);
+      $("#meOut").innerHTML = 'فایدهٔ نو: <b style="color:' + (m > 0 ? "var(--primary)" : "var(--danger)") + '">' +
+        money(m) + '</b> (' + Math.round((m / s) * 100) + '٪)';
+    }
+    refresh();
+    $("#meSell").addEventListener("input", refresh);
+    $("#meOk").addEventListener("click", function () {
+      var s = parseFloat($("#meSell").value);
+      if (!(s > 0)) { toast("نرخ را درست بنویسید", true); return; }
+      p.sell = s; save(LS_P, products);
+      closeSheet(); renderMore(); renderProducts(); renderSaleGrid();
+      toast("نرخ تازه شد ✓");
+    });
+    setTimeout(function () { var i = $("#meSell"); i.focus(); i.select(); }, 60);
+  }
+
   // ---------- WiFi (وای‌فای) ----------
   function renderWifi(el) {
     var head = '<div class="subhead"><button class="back moreBack" aria-label="بازگشت">→</button><h3>وای‌فای</h3></div>';
@@ -2539,6 +2864,12 @@
   }
 
   // ---------- Events ----------
+  $("#priceBar").addEventListener("click", function (e) {
+    var b = e.target.closest("[data-pf]"); if (!b) return;
+    priceFilter = b.dataset.pf === "all" ? null : parseFloat(b.dataset.pf);
+    renderSaleGrid();
+    buzz();
+  });
   $("#saleGrid").addEventListener("click", function (e) {
     var t = e.target.closest(".tile"); if (t) onTileTap(t.dataset.id);
   });
@@ -2628,6 +2959,9 @@
     var m = e.target.closest("[data-more]"); if (m) { moreView = m.dataset.more; renderMore(); return; }
     if (e.target.closest(".moreBack")) { moreView = null; renderMore(); return; }
     if (e.target.closest("#newWasteBtn")) { openWastePicker(); return; }
+    if (e.target.closest("#groupPriceBtn")) { openGroupPrice(); return; }
+    var me = e.target.closest("[data-medit]");
+    if (me) { var mp = findP(me.dataset.medit); if (mp) openMarginEdit(mp); return; }
     var w = e.target.closest("[data-wexp]"); if (w) { var p = findP(w.dataset.wexp); if (p) openWasteForm(p, "expired"); return; }
     if (e.target.closest("#newExpenseBtn")) { openExpenseForm(); return; }
     var cor = e.target.closest("[data-correct]"); if (cor) { var ex = null; for (var i = 0; i < expenses.length; i++) if (expenses[i].id === cor.dataset.correct) ex = expenses[i]; if (ex) openCorrectionForm(ex); return; }

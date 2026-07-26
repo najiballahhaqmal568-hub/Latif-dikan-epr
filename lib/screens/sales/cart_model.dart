@@ -46,6 +46,22 @@ class CartModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// گام کم/زیادکردن برحسب واحد جنس: وزنی نیم کیلو، بقیه یک.
+  static double stepFor(Product product) =>
+      product.unit == 'kg' ? 0.5 : 1;
+
+  /// کم/زیادکردن یک قلم با دکمه‌های − و ＋؛ اگر به صفر رسید برداشته می‌شود.
+  void bump(CartItem item, int direction) {
+    final next = double.parse(
+        (item.quantity + direction * stepFor(item.product)).toStringAsFixed(3));
+    if (next <= 0) {
+      removeItem(item);
+      return;
+    }
+    item.quantity = next;
+    notifyListeners();
+  }
+
   /// تنظیم مستقیم مقدار یک قلم (برای ویرایش داخل سبد).
   void setQuantity(CartItem item, double quantity) {
     if (quantity <= 0) {

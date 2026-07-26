@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../models/product.dart';
 import '../../repositories/product_repository.dart';
@@ -39,6 +40,24 @@ class _ProductListScreenState extends State<ProductListScreen> {
     if (changed == true) {
       _reload();
     }
+  }
+
+  /// ستاره‌دارکردن/برداشتن یک جنس — ستاره‌دارها در بالای صفحهٔ فروش می‌آیند.
+  Future<void> _toggleStar(Product product) async {
+    final next = !product.isPopular;
+    await _repo.update(product.copyWith(isPopular: next));
+    HapticFeedback.selectionClick();
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+          content: Text(next
+              ? '«${product.name}» پرفروش شد ⭐'
+              : 'از پرفروش‌ها برداشته شد'),
+          duration: const Duration(seconds: 2),
+        ));
+    }
+    _reload();
   }
 
   Future<void> _confirmDelete(Product product) async {
@@ -105,6 +124,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
                 product: products[index],
                 onTap: () => _openForm(product: products[index]),
                 onDelete: () => _confirmDelete(products[index]),
+                onToggleStar: () => _toggleStar(products[index]),
               );
             },
           );
@@ -118,11 +138,13 @@ class _ProductRow extends StatelessWidget {
   final Product product;
   final VoidCallback onTap;
   final VoidCallback onDelete;
+  final VoidCallback onToggleStar;
 
   const _ProductRow({
     required this.product,
     required this.onTap,
     required this.onDelete,
+    required this.onToggleStar,
   });
 
   @override
@@ -160,19 +182,35 @@ class _ProductRow extends StatelessWidget {
           ],
         ),
       ),
-      leading: CircleAvatar(
-        radius: 26,
-        backgroundColor: product.type == ProductType.unit
-            ? AppTheme.credit
-            : AppTheme.primary,
-        child: Icon(
-          product.type == ProductType.wifi
-              ? Icons.wifi
-              : (product.type == ProductType.weighted
-                  ? Icons.scale
-                  : Icons.inventory_2),
-          color: Colors.white,
-        ),
+      leading: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // ستارهٔ «پرفروش» — در بالای صفحهٔ فروش می‌آید
+          IconButton(
+            onPressed: onToggleStar,
+            tooltip: 'پرفروش',
+            visualDensity: VisualDensity.compact,
+            icon: Icon(
+              product.isPopular ? Icons.star : Icons.star_border,
+              color: product.isPopular ? AppTheme.credit : Colors.grey,
+              size: 24,
+            ),
+          ),
+          CircleAvatar(
+            radius: 26,
+            backgroundColor: product.type == ProductType.unit
+                ? AppTheme.credit
+                : AppTheme.primary,
+            child: Icon(
+              product.type == ProductType.wifi
+                  ? Icons.wifi
+                  : (product.type == ProductType.weighted
+                      ? Icons.scale
+                      : Icons.inventory_2),
+              color: Colors.white,
+            ),
+          ),
+        ],
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,

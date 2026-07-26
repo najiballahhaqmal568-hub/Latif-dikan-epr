@@ -22,6 +22,9 @@ class Sale {
   final double total;
   final PaymentType paymentType;
   final String? customerName; // یادداشت قرض (مرحله اول)
+  final int? customerId;
+  final int? returnOf; // اگر پر بود، این رکورد «برگشتی» فروش دیگری است
+  final bool returned; // فروش اصلی که برگشت داده شده
 
   const Sale({
     this.id,
@@ -29,7 +32,13 @@ class Sale {
     required this.total,
     required this.paymentType,
     this.customerName,
+    this.customerId,
+    this.returnOf,
+    this.returned = false,
   });
+
+  /// آیا این فروش هنوز می‌تواند برگشت داده شود؟
+  bool get canReturn => returnOf == null && !returned;
 
   Map<String, Object?> toMap() {
     return {
@@ -38,6 +47,9 @@ class Sale {
       'total': total,
       'payment_type': paymentType.dbValue,
       'customer_name': customerName,
+      'customer_id': customerId,
+      'return_of': returnOf,
+      'returned': returned ? 1 : 0,
     };
   }
 
@@ -48,6 +60,9 @@ class Sale {
       total: (map['total'] as num).toDouble(),
       paymentType: PaymentType.fromDb(map['payment_type'] as String),
       customerName: map['customer_name'] as String?,
+      customerId: map['customer_id'] as int?,
+      returnOf: map['return_of'] as int?,
+      returned: (map['returned'] as int? ?? 0) == 1,
     );
   }
 }

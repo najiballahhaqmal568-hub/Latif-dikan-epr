@@ -9,7 +9,7 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._();
 
   static const String _dbName = 'dukan_latif.db';
-  static const int _dbVersion = 10;
+  static const int _dbVersion = 11;
 
   Database? _db;
 
@@ -56,7 +56,9 @@ class DatabaseHelper {
         total REAL NOT NULL DEFAULT 0,
         payment_type TEXT NOT NULL,
         customer_name TEXT,
-        customer_id INTEGER
+        customer_id INTEGER,
+        return_of INTEGER,
+        returned INTEGER NOT NULL DEFAULT 0
       )
     ''');
 
@@ -236,6 +238,13 @@ class DatabaseHelper {
       // ضایعات کسری شمارش با کلید ماه نشانی می‌شود تا شمارش دوبارهٔ
       // همان ماه، ضرر را دوبار حساب نکند.
       await db.execute('ALTER TABLE waste ADD COLUMN count_month TEXT');
+    }
+    if (oldVersion < 11) {
+      // برگشتی فروش: فروش پاک نمی‌شود؛ یک رکورد منفی با return_of ثبت
+      // می‌گردد و فروش اصلی با returned نشانی می‌شود.
+      await db.execute('ALTER TABLE sales ADD COLUMN return_of INTEGER');
+      await db.execute(
+          'ALTER TABLE sales ADD COLUMN returned INTEGER NOT NULL DEFAULT 0');
     }
   }
 

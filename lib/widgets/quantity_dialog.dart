@@ -29,14 +29,24 @@ class _QuantityDialog extends StatefulWidget {
 
 class _QuantityDialogState extends State<_QuantityDialog> {
   final TextEditingController _controller = TextEditingController();
+  final TextEditingController _moneyController = TextEditingController();
 
   // پیش‌فرض‌های مقدار — برای جی‌بی (وای‌فای) اعداد بزرگ‌تر.
   List<double> get _presets =>
       widget.product.unit == 'gb' ? const [1, 2, 5, 10] : const [0.5, 1, 2, 5];
 
+  /// مقدار از روی پیسه: مقدار = پیسه ÷ قیمت فی واحد.
+  double get _moneyQty {
+    final m = double.tryParse(_moneyController.text.trim()) ?? 0;
+    final price = widget.product.sellPrice;
+    if (m <= 0 || price <= 0) return 0;
+    return double.parse((m / price).toStringAsFixed(3));
+  }
+
   @override
   void dispose() {
     _controller.dispose();
+    _moneyController.dispose();
     super.dispose();
   }
 
@@ -51,8 +61,10 @@ class _QuantityDialogState extends State<_QuantityDialog> {
     }
   }
 
+  /// اول مقدار تایپ‌شده؛ اگر نبود، مقدار از روی پیسه.
   void _confirmTyped() {
-    final qty = double.tryParse(_controller.text.trim()) ?? 0;
+    var qty = double.tryParse(_controller.text.trim()) ?? 0;
+    if (qty <= 0) qty = _moneyQty;
     _confirm(qty);
   }
 
@@ -61,7 +73,9 @@ class _QuantityDialogState extends State<_QuantityDialog> {
     final unit = unitLabel(widget.product.unit);
     return AlertDialog(
       title: Text('مقدار ${widget.product.name}'),
-      content: Column(
+      // در تیلفون خورد، محتوا سکرول شود تا دکمه‌ها همیشه برسند
+      content: SingleChildScrollView(
+        child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -112,9 +126,50 @@ class _QuantityDialogState extends State<_QuantityDialog> {
               suffixText: unit,
               border: const OutlineInputBorder(),
             ),
+            onChanged: (v) {
+              // اگر مقدار تایپ شد، خانهٔ پیسه پاک شود
+              if (v.trim().isNotEmpty && _moneyController.text.isNotEmpty) {
+                setState(() => _moneyController.clear());
+              }
+            },
             onSubmitted: (_) => _confirmTyped(),
           ),
+          const SizedBox(height: 12),
+          const Text(
+            'یا به اندازهٔ پیسه:',
+            style: TextStyle(fontSize: 16),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _moneyController,
+            keyboardType:
+                const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+            ],
+            textDirection: TextDirection.ltr,
+            style: const TextStyle(fontSize: 20),
+            decoration: const InputDecoration(
+              hintText: 'مثلاً: 50',
+              suffixText: 'افغانی',
+              border: OutlineInputBorder(),
+            ),
+            onChanged: (v) {
+              setState(() {
+                if (v.trim().isNotEmpty) _controller.clear();
+              });
+            },
+            onSubmitted: (_) => _confirmTyped(),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            _moneyQty > 0
+                ? 'مقدار: ${formatQuantityWithUnit(_moneyQty, widget.product.unit)}'
+                : 'مقدار: —',
+            style: const TextStyle(fontSize: 14, color: Colors.grey),
+          ),
         ],
+        ),
       ),
       actions: [
         TextButton(

@@ -10,9 +10,11 @@ class ProductRepository {
   ProductRepository({DatabaseHelper? helper})
       : _helper = helper ?? DatabaseHelper.instance;
 
+  /// همهٔ اجناس — پرفروش‌ها (ستاره‌دار) اول تا زود پیدا شوند.
   Future<List<Product>> getAll() async {
     final db = await _helper.database;
-    final rows = await db.query('products', orderBy: 'name COLLATE NOCASE');
+    final rows = await db.query('products',
+        orderBy: 'is_popular DESC, name COLLATE NOCASE');
     return rows.map(Product.fromMap).toList();
   }
 

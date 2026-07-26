@@ -29,7 +29,8 @@ class CustomerRepository {
     final db = await _helper.database;
     await db.transaction((txn) async {
       await txn.rawUpdate(
-        'UPDATE customers SET debt = MAX(0, debt - ?) WHERE id = ?',
+        // اگر بیشتر از قرض داد، باقی «پیش‌پرداخت» (منفی) می‌ماند و گم نمی‌شود
+        'UPDATE customers SET debt = ROUND(debt - ?, 2) WHERE id = ?',
         [amount, customerId],
       );
       await txn.insert('customer_payments', {

@@ -60,5 +60,7 @@ String expiryLabel(int days) {
 
 /// سبب ضایعات به دری.
 String wasteReasonLabel(String reason) {
-  return reason == 'expired' ? 'تاریخ‌تیر' : 'خراب';
+  if (reason == 'expired') return 'تاریخ‌تیر';
+  if (reason == 'shortage') return 'کسری شمارش';
+  return 'خراب';
 }

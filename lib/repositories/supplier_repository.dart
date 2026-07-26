@@ -39,7 +39,8 @@ class SupplierRepository {
     final db = await _helper.database;
     await db.transaction((txn) async {
       await txn.rawUpdate(
-        'UPDATE suppliers SET debt = MAX(0, debt - ?) WHERE id = ?',
+        // اگر بیشتر از قرض پرداخت شد، باقی «پیش‌پرداخت» (منفی) می‌ماند و گم نمی‌شود
+        'UPDATE suppliers SET debt = ROUND(debt - ?, 2) WHERE id = ?',
         [amount, supplierId],
       );
       await txn.insert('supplier_payments', {

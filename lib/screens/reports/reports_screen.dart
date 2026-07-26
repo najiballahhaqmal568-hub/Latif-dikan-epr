@@ -109,7 +109,26 @@ class _ReportsScreenState extends State<ReportsScreen> {
                                 : AppTheme.danger),
                       ]),
                       _card([
-                        _row('مصارف خانه (جدا)', d.expenses),
+                        _row('مصارف خانه', d.expenses),
+                        const Divider(),
+                        _row('فایدهٔ نهایی (بعد از مصارف خانه)', d.netProfit,
+                            bold: true,
+                            color: d.netProfit >= 0
+                                ? AppTheme.primary
+                                : AppTheme.danger),
+                      ]),
+                      _card([
+                        _row('پیسهٔ داخل‌شده (نقد + دریافت قرض)', d.cashIn),
+                        _row('پیسهٔ خارج‌شده (خرید نقد + پرداخت + مصارف)',
+                            d.cashOut),
+                        const Divider(),
+                        _row('صندوق نقد (باید در دست باشد)', d.cashBox,
+                            bold: true,
+                            color: d.cashBox >= 0
+                                ? AppTheme.primary
+                                : AppTheme.danger),
+                      ]),
+                      _card([
                         _row('قرض مشتری‌ها (فعلی)', d.customerDebt,
                             color: AppTheme.danger),
                         _row('قرض تامین‌کننده (فعلی)', d.supplierDebt,

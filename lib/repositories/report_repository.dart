@@ -28,9 +28,18 @@ class ReportData {
   final double expenses;
   final double customerDebt;
   final double supplierDebt;
+  final double cashIn; // فروش نقد + دریافت از مشتری
+  final double cashOut; // خرید نقد + پرداخت به تامین‌کننده + مصارف خانه
   final List<ProductProfit> perProduct;
 
+  /// فایدهٔ دوکان = فروش − قیمت تمام‌شد − ضرر ضایعات (کسری شمارش هم در ضایعات است).
   double get profit => totalSales - cogs - wasteLoss;
+
+  /// فایدهٔ نهایی بعد از کم‌کردن مصارف خانه.
+  double get netProfit => profit - expenses;
+
+  /// پیسه‌ای که باید در صندوق باشد.
+  double get cashBox => cashIn - cashOut;
 
   const ReportData({
     required this.totalSales,
@@ -41,6 +50,8 @@ class ReportData {
     required this.expenses,
     required this.customerDebt,
     required this.supplierDebt,
+    required this.cashIn,
+    required this.cashOut,
     required this.perProduct,
   });
 }
@@ -102,6 +113,18 @@ class ReportRepository {
     final supplierDebt =
         await _scalar('SELECT COALESCE(SUM(debt),0) FROM suppliers', const []);
 
+    // صندوق نقد
+    final custPaid = await _scalar(
+        'SELECT COALESCE(SUM(amount),0) FROM customer_payments WHERE date >= ?',
+        [start]);
+    final purchasePaid = await _scalar(
+        'SELECT COALESCE(SUM(paid),0) FROM purchases WHERE date >= ?', [start]);
+    final supPaid = await _scalar(
+        'SELECT COALESCE(SUM(amount),0) FROM supplier_payments WHERE date >= ?',
+        [start]);
+    final cashIn = cash + custPaid;
+    final cashOut = purchasePaid + supPaid + expenses;
+
     final rows = await db.rawQuery(
       'SELECT si.product_name AS name, '
       'SUM(si.quantity) AS qty, '
@@ -131,6 +154,8 @@ class ReportRepository {
       expenses: expenses,
       customerDebt: customerDebt,
       supplierDebt: supplierDebt,
+      cashIn: cashIn,
+      cashOut: cashOut,
       perProduct: perProduct,
     );
   }

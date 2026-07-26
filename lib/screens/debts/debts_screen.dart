@@ -152,7 +152,9 @@ class _CustomersViewState extends State<_CustomersView> {
               name: c.name,
               phone: c.phone,
               debt: c.debt,
-              debtLabel: c.debt > 0 ? 'قرض او' : 'تصفیه',
+              debtLabel: c.debt > 0
+                  ? 'قرض او'
+                  : (c.debt < 0 ? 'پیش‌پرداخت او' : 'تصفیه'),
               onTap: () => _openDetail(c),
             );
           },
@@ -222,10 +224,11 @@ class _CustomerDetailSheetState extends State<_CustomerDetailSheet> {
     return _LedgerSheet(
       name: widget.customer.name,
       phone: widget.customer.phone,
-      debtLabel: 'مجموع قرض او به ما',
+      debtLabel:
+          _debt < 0 ? 'پیش‌پرداخت او نزد ما' : 'مجموع قرض او به ما',
       debt: _debt,
       payLabel: 'دریافت پرداخت از مشتری',
-      onPay: _debt > 0 ? _pay : null,
+      onPay: _pay,
       receiptsTitle: 'رسیدهای دریافت',
       receipts: _receipts
           .map((r) => _HistoryRow(
@@ -342,7 +345,9 @@ class _SuppliersViewState extends State<_SuppliersView> {
               name: s.name,
               phone: s.phone,
               debt: s.debt,
-              debtLabel: s.debt > 0 ? 'قرض ما' : 'تصفیه',
+              debtLabel: s.debt > 0
+                  ? 'قرض ما'
+                  : (s.debt < 0 ? 'پیش‌پرداخت ما' : 'تصفیه'),
               onTap: () => _openDetail(s),
             );
           },
@@ -412,10 +417,10 @@ class _SupplierDetailSheetState extends State<_SupplierDetailSheet> {
     return _LedgerSheet(
       name: widget.supplier.name,
       phone: widget.supplier.phone,
-      debtLabel: 'مجموع قرض ما',
+      debtLabel: _debt < 0 ? 'پیش‌پرداخت ما نزد او' : 'مجموع قرض ما',
       debt: _debt,
       payLabel: 'پرداخت به تامین‌کننده',
-      onPay: _debt > 0 ? _pay : null,
+      onPay: _pay,
       receiptsTitle: 'رسیدهای پرداخت',
       receipts: _receipts
           .map((r) => _HistoryRow(
@@ -494,7 +499,7 @@ class _DebtTile extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            Text(formatAfghani(debt),
+            Text(formatAfghani(debt.abs()),
                 style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
@@ -610,7 +615,7 @@ class _LedgerSheet extends StatelessWidget {
                 Text(debtLabel,
                     style: const TextStyle(
                         fontSize: 17, fontWeight: FontWeight.bold)),
-                Text(formatAfghani(debt),
+                Text(formatAfghani(debt.abs()),
                     style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,

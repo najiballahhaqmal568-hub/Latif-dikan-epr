@@ -95,10 +95,23 @@ class PurchaseRepository {
           'quantity': l.quantity,
           'buy_price': l.buyPrice,
         });
-        // زیادکردن موجودی و تازه‌کردن قیمت خرید
+        // زیادکردن موجودی و تازه‌کردن قیمت خرید به «اوسط وزنی»:
+        // اگر موجودی کهنه بود، اوسط موجودی کهنه و خرید نو؛ ورنه قیمت نو.
         await txn.rawUpdate(
-          'UPDATE products SET quantity = quantity + ?, buy_price = ? WHERE id = ?',
-          [l.quantity, l.buyPrice, productId],
+          'UPDATE products SET '
+          'buy_price = CASE WHEN quantity > 0 '
+          '  THEN ROUND(((quantity * buy_price) + (? * ?)) / (quantity + ?), 2) '
+          '  ELSE ? END, '
+          'quantity = quantity + ? '
+          'WHERE id = ?',
+          [
+            l.quantity,
+            l.buyPrice,
+            l.quantity,
+            l.buyPrice,
+            l.quantity,
+            productId,
+          ],
         );
       }
 

@@ -77,13 +77,16 @@ class _StockCountScreenState extends State<StockCountScreen> {
         counted: counted,
       ));
     }
-    final diffs = await _repo.saveCount(_month, entries);
+    final res = await _repo.saveCount(_month, entries);
     if (!mounted) return;
     setState(() => _saving = false);
+    final lossText = res.shortageLoss > 0
+        ? ' • ضرر کسری: ${formatAfghani(res.shortageLoss)}'
+        : '';
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(diffs == 0
+        content: Text(res.diffs == 0
             ? 'شمارش ثبت شد — هیچ فرقی نبود ✓'
-            : 'شمارش ثبت شد — $diffs قلم فرق داشت')));
+            : 'شمارش ثبت شد — ${res.diffs} قلم فرق داشت$lossText')));
     _load();
   }
 

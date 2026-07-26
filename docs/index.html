@@ -86,11 +86,14 @@
   .app {
     max-width: 520px;
     margin: 0 auto;
+    /* بلندی ثابت: فقط فهرست وسط سکرول می‌شود تا سبد و نوار پایین هرگز پنهان نشوند */
+    height: 100dvh;
     min-height: 100dvh;
     display: flex;
     flex-direction: column;
     background: var(--ground);
     position: relative;
+    overflow: hidden;
   }
 
   header.bar {
@@ -113,12 +116,14 @@
   header.bar h1 { font-size: 20px; margin: 0; font-weight: 800; letter-spacing: .2px; }
   header.bar .sub { font-size: 12.5px; opacity: .85; margin-top: 1px; }
 
-  main { flex: 1 1 auto; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  main { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
   .screen { display: none; }
   .screen.active { display: block; }
 
   /* Search */
-  .searchwrap { padding: 12px 14px 6px; position: sticky; top: 0; background: var(--ground); z-index: 10; }
+  .searchwrap { padding: 12px 14px 6px; position: sticky; top: 0; background: var(--ground); z-index: 10;
+    display: flex; align-items: center; gap: 8px; }
+  .searchwrap .search { flex: 1 1 auto; min-width: 0; }
   .search {
     width: 100%; display: flex; align-items: center; gap: 10px;
     background: var(--surface); border: 1.5px solid var(--line);
@@ -146,7 +151,7 @@
     display: flex; flex-direction: column; align-items: center; gap: 4px;
     cursor: pointer; box-shadow: var(--shadow); text-align: center;
     transition: transform .06s ease, border-color .12s ease;
-    min-height: 118px; justify-content: center;
+    min-height: 118px; justify-content: center; position: relative;
   }
   .tile:active { transform: scale(.96); }
   .tile .ico {
@@ -169,8 +174,77 @@
     box-shadow: var(--shadow-lg);
     border-radius: 18px 18px 0 0;
     padding: 8px 14px 12px;
+    /* ستون منعطف با سقف بلندی: فهرست سبد کوچک می‌شود تا دکمه‌های «تمام» همیشه دیده شوند */
+    display: flex; flex-direction: column; max-height: 66vh;
   }
-  .cartlist { max-height: 168px; overflow-y: auto; margin: 2px 0 4px; }
+  .cartbar > .carthead, .cartbar > .totrow, .cartbar > .changerow, .cartbar > .payrow { flex: 0 0 auto; }
+  .cartbar > #cartArea { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+  /* سبد بلندتر (تا ~۶ قلم) ولی در جای تنگ خودش کوچک می‌شود */
+  .cartlist { flex: 1 1 auto; min-height: 0; max-height: 300px; overflow-y: auto; margin: 2px 0 4px; }
+
+  /* سر سبد: شمارندهٔ اقلام + پاک‌کردن */
+  .carthead { display: flex; align-items: center; justify-content: space-between; padding: 0 2px 4px; }
+  .carthead span { font-size: 13.5px; font-weight: 800; color: var(--ink-soft); }
+  .carthead button {
+    border: 0; background: var(--danger-soft); color: var(--danger); font: inherit;
+    font-size: 13px; font-weight: 800; padding: 5px 10px; border-radius: 9px; cursor: pointer;
+  }
+
+  /* کم/زیادکردن تعداد در سبد */
+  .citem .qbtn {
+    width: 32px; height: 32px; flex: 0 0 auto; border-radius: 9px; border: 0;
+    background: var(--primary-soft); color: var(--primary); font: inherit;
+    font-size: 20px; font-weight: 900; line-height: 1; cursor: pointer;
+    display: grid; place-items: center;
+  }
+  .citem .qbtn:active { transform: scale(.92); }
+
+  /* حساب باقی (پیسهٔ پس‌دادن) — با دکمه باز/بسته می‌شود تا جای دکمه‌های «تمام» را نگیرد */
+  .chtoggle {
+    border: 2px solid var(--line); background: var(--card); color: var(--ink-soft);
+    font: inherit; font-size: 14px; font-weight: 800; padding: 6px 12px;
+    border-radius: 10px; cursor: pointer; margin-inline-start: auto; margin-inline-end: 10px;
+  }
+  .chtoggle.on { background: var(--primary-soft); color: var(--primary); border-color: var(--primary); }
+  .changerow { padding: 2px 0 8px; }
+  .chline { display: flex; align-items: center; gap: 8px; }
+  .chline input {
+    flex: 1 1 0; min-width: 0; font: inherit; font-size: 16px; font-weight: 700;
+    padding: 9px 10px; border: 2px solid var(--line); border-radius: 10px; background: var(--card);
+    color: var(--ink);
+  }
+  .chline input:focus { outline: 0; border-color: var(--primary); }
+  .chclr {
+    width: 32px; height: 32px; flex: 0 0 auto; border: 0; border-radius: 9px;
+    background: var(--danger-soft); color: var(--danger); font-size: 18px; cursor: pointer;
+  }
+  .chres { flex: 0 0 auto; font-size: 15.5px; font-weight: 900; color: var(--primary); }
+  .chres.short { color: var(--danger); }
+  .chips { display: flex; gap: 6px; margin-top: 6px; }
+  .chips button {
+    flex: 1 1 0; border: 2px solid var(--line); background: var(--card); color: var(--ink);
+    font: inherit; font-size: 14px; font-weight: 800; padding: 7px 2px; border-radius: 9px; cursor: pointer;
+  }
+  .chips button:active { background: var(--primary-soft); }
+
+  /* دکمهٔ فروش‌های امروز کنار جستجو */
+  .todaybtn {
+    flex: 0 0 auto; width: 46px; height: 46px; border: 2px solid var(--line); border-radius: 12px;
+    background: var(--card); font-size: 21px; cursor: pointer; display: grid; place-items: center;
+  }
+  .todaybtn:active { background: var(--primary-soft); }
+
+  /* ستارهٔ جنس پرفروش */
+  .star {
+    width: 38px; height: 38px; flex: 0 0 auto; border: 0; background: transparent;
+    font-size: 20px; cursor: pointer; display: grid; place-items: center;
+    opacity: .25; filter: grayscale(1); transition: opacity .12s, filter .12s;
+  }
+  .star.on { opacity: 1; filter: none; }
+  .tile .startag { position: absolute; top: 5px; inset-inline-end: 7px; font-size: 12px; }
+  .tile.oosdim { opacity: .45; }
+  .retbadge { font-size: 11px; font-weight: 800; padding: 2px 7px; border-radius: 7px;
+    background: var(--danger-soft); color: var(--danger); }
   .citem { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--line); }
   .citem:last-child { border-bottom: 0; }
   .citem .x {
@@ -417,6 +491,7 @@
           <input id="search" type="text" inputmode="search" placeholder="جستجوی جنس..." autocomplete="off" />
           <button class="clr" id="searchClr" style="display:none" aria-label="پاک">×</button>
         </div>
+        <button class="todaybtn" id="btnTodaySales" title="فروش‌های امروز">🧾</button>
       </div>
       <div class="grid" id="saleGrid"></div>
     </section>
@@ -450,10 +525,29 @@
 
   <!-- Cart (sales only) -->
   <div class="cartbar" id="cartbar">
+    <div class="carthead" id="cartHead" style="display:none">
+      <span id="cartCount">۰ قلم</span>
+      <button id="cartClear">🗑 پاک‌کردن سبد</button>
+    </div>
     <div id="cartArea"></div>
     <div class="totrow">
       <span class="lbl">مجموع:</span>
+      <button class="chtoggle" id="changeToggle" style="display:none">💵 باقی</button>
       <span class="tot num" id="cartTotal">۰ افغانی</span>
+    </div>
+    <div class="changerow" id="changeRow" style="display:none">
+      <div class="chline">
+        <input id="paidAmt" type="number" inputmode="decimal" step="any" min="0" placeholder="پیسهٔ مشتری" />
+        <button class="chclr" id="paidClr" aria-label="پاک">×</button>
+        <span class="chres num" id="changeRes">باقی: ۰ افغانی</span>
+      </div>
+      <div class="chips" id="paidChips">
+        <button data-add="50">۵۰</button>
+        <button data-add="100">۱۰۰</button>
+        <button data-add="500">۵۰۰</button>
+        <button data-add="1000">۱۰۰۰</button>
+        <button data-exact="1">دقیق</button>
+      </div>
     </div>
     <div class="payrow">
       <button class="btn cash" id="btnCash" disabled>✓ تمام — نقد</button>
@@ -576,11 +670,20 @@
       g.innerHTML = '<div class="empty" style="grid-column:1/-1"><div class="big">🔍</div><p>جنسی پیدا نشد</p></div>';
       return;
     }
+    // ترتیب: ستاره‌دارها اول، بعد موجودها، بعد تمام‌شده‌ها (هیچ‌کدام پنهان نمی‌شود)
+    list = list.slice().sort(function (a, b) {
+      var sa = a.star ? 0 : 1, sb = b.star ? 0 : 1;
+      if (sa !== sb) return sa - sb;
+      var oa = a.qty > 0 ? 0 : 1, ob = b.qty > 0 ? 0 : 1;
+      if (oa !== ob) return oa - ob;
+      return a.name.localeCompare(b.name, "fa");
+    });
     g.innerHTML = list.map(function (p) {
-      var cls = typeCls(p.type);
+      var cls = typeCls(p.type) + (p.qty <= 0 ? " oosdim" : "");
       var ico = typeIcon(p.type);
       var oos = p.qty <= 0 ? '<div class="oos">موجود نیست</div>' : '';
       return '<div class="tile ' + cls + '" data-id="' + p.id + '" role="button" tabindex="0">' +
+        (p.star ? '<span class="startag">⭐</span>' : '') +
         '<div class="ico">' + ico + '</div>' +
         '<div class="nm">' + esc(p.name) + '</div>' +
         '<div class="pr num">' + money(p.sell) + '</div>' +
@@ -602,10 +705,23 @@
   function addToCart(pid, qty) {
     if (qty <= 0) return;
     var line = cartLine(pid);
-    if (line) line.qty += qty; else cart.push({ productId: pid, qty: qty });
+    if (line) line.qty = +(line.qty + qty).toFixed(3); else cart.push({ productId: pid, qty: qty });
     renderCart();
+    buzz();
   }
   function removeLine(pid) { cart = cart.filter(function (l) { return l.productId !== pid; }); renderCart(); }
+  // گام کم/زیادکردن برحسب واحد جنس
+  function qtyStep(p) { return p.unit === "kg" ? 0.5 : 1; }
+  // کم/زیادکردن تعداد یک سطر سبد؛ اگر به صفر رسید، سطر برداشته می‌شود
+  function bumpLine(pid, dir) {
+    var p = findP(pid), line = cartLine(pid);
+    if (!p || !line) return;
+    var q = +(line.qty + dir * qtyStep(p)).toFixed(3);
+    if (q <= 0) removeLine(pid); else { line.qty = q; renderCart(); }
+    buzz();
+  }
+  // لرزش خورد برای تأیید بی‌صدا (اگر دستگاه پشتیبانی کند)
+  function buzz(ms) { try { if (navigator.vibrate) navigator.vibrate(ms || 15); } catch (e) {} }
   function cartTotal() {
     var s = 0; cart.forEach(function (l) { var p = findP(l.productId); if (p) s += p.sell * l.qty; }); return s;
   }
@@ -618,6 +734,8 @@
         var p = findP(l.productId); if (!p) return "";
         return '<div class="citem">' +
           '<button class="x" data-rem="' + p.id + '" aria-label="برگرداندن">×</button>' +
+          '<button class="qbtn" data-dec="' + p.id + '" aria-label="کم">−</button>' +
+          '<button class="qbtn" data-inc="' + p.id + '" aria-label="زیاد">＋</button>' +
           '<div class="cn"><b>' + esc(p.name) + '</b><small class="num">' + qtyUnit(l.qty, p.unit) + ' × ' + money(p.sell) + '</small></div>' +
           '<div class="lt num">' + money(p.sell * l.qty) + '</div>' +
           '</div>';
@@ -626,6 +744,32 @@
     $("#cartTotal").textContent = money(cartTotal());
     var empty = cart.length === 0;
     $("#btnCash").disabled = empty; $("#btnCredit").disabled = empty;
+    $("#cartHead").style.display = empty ? "none" : "flex";
+    $("#cartCount").textContent = nf.format(cart.length) + " قلم";
+    $("#changeToggle").style.display = empty ? "none" : "block";
+    $("#changeRow").style.display = (!empty && changeOpen) ? "block" : "none";
+    renderChange();
+  }
+
+  // ---------- حساب باقی (پیسهٔ پس‌دادن) — فقط ماشین‌حساب، در حساب‌ها اثری ندارد ----------
+  var changeOpen = false;
+  function renderChange() {
+    var el = $("#changeRes"); if (!el) return;
+    var paid = parseFloat($("#paidAmt").value);
+    var total = cartTotal();
+    if (isNaN(paid) || $("#paidAmt").value === "") {
+      el.textContent = "باقی: —"; el.classList.remove("short"); return;
+    }
+    var diff = +(paid - total).toFixed(2);
+    if (diff >= 0) { el.textContent = "باقی: " + money(diff); el.classList.remove("short"); }
+    else { el.textContent = "کم است: " + money(-diff); el.classList.add("short"); }
+  }
+  // پاک‌کردن و بستن قطی باقی (بعد از هر فروش)
+  function clearChange() {
+    var i = $("#paidAmt"); if (i) i.value = "";
+    changeOpen = false;
+    var t = $("#changeToggle"); if (t) t.classList.remove("on");
+    renderChange();
   }
 
   function finishSale(type, customerName) {
@@ -653,8 +797,86 @@
     cart.forEach(function (l) { var p = findP(l.productId); if (p) p.qty = +(p.qty - l.qty).toFixed(3); });
     save(LS_S, sales); save(LS_P, products);
     cart = [];
+    clearChange();
     renderCart(); renderSaleGrid();
+    buzz(30);
     toast(type === "cash" ? "فروش نقد ثبت شد ✓" : "فروش قرض ثبت شد ✓");
+  }
+
+  // ---------- فروش‌های امروز + برگشتی (اصلاح فروش اشتباه) ----------
+  // برگشتی فروش را پاک نمی‌کند؛ یک رکورد منفی ثبت می‌کند تا دفتر دست‌نخورده بماند:
+  // موجودی پس می‌آید، قرض مشتری کم می‌شود، و فایده خودکار درست می‌گردد.
+  function todaySales() {
+    var start = new Date(); start.setHours(0, 0, 0, 0);
+    return sales.filter(function (s) { return new Date(s.date) >= start; })
+      .sort(function (a, b) { return (b.date || "").localeCompare(a.date || ""); });
+  }
+
+  function returnSale(sale) {
+    if (sale.returned || sale.returnOf) return;
+    var items = (sale.items || []).map(function (it) {
+      return { productId: it.productId, productName: it.productName, quantity: -it.quantity,
+               sellPrice: it.sellPrice, buyPrice: it.buyPrice };
+    });
+    // موجودی پس بیاید
+    (sale.items || []).forEach(function (it) {
+      var p = findP(it.productId);
+      if (p) p.qty = +(p.qty + it.quantity).toFixed(3);
+    });
+    // اگر قرضی بود، قرض مشتری کم شود
+    if (sale.paymentType === "credit" && sale.customerId) {
+      var c = findC(sale.customerId);
+      if (c) c.debt = +(c.debt - sale.total).toFixed(2);
+    }
+    sale.returned = true;
+    sales.push({ id: id(), date: new Date().toISOString(), total: -sale.total,
+      paymentType: sale.paymentType, customerName: sale.customerName, customerId: sale.customerId,
+      items: items, returnOf: sale.id });
+    save(LS_S, sales); save(LS_P, products); save(LS_CUST, customers);
+    renderSaleGrid(); renderCustomers();
+    buzz(30);
+    toast("برگشتی ثبت شد ✓ موجودی پس آمد");
+    openTodaySales();
+  }
+
+  function openTodaySales() {
+    var list = todaySales();
+    var rows = list.length === 0
+      ? '<p style="color:var(--ink-soft);text-align:center;padding:12px">امروز فروشی ثبت نشده</p>'
+      : list.map(function (s) {
+          var t = new Date(s.date);
+          function pad(n) { return n < 10 ? "0" + n : n; }
+          var time = pad(t.getHours()) + ":" + pad(t.getMinutes());
+          var kind = s.paymentType === "cash" ? "نقد" : "قرض" + (s.customerName ? " — " + esc(s.customerName) : "");
+          var isRet = !!s.returnOf;
+          var btn = (isRet || s.returned) ? '' :
+            '<button class="wbtn" data-ret="' + s.id + '" style="background:var(--danger)">برگشتی</button>';
+          var tag = isRet ? ' <span class="retbadge">برگشتی</span>'
+                  : (s.returned ? ' <span class="retbadge">برگشت شد</span>' : '');
+          return '<div class="iline">' + btn +
+            '<div class="in"><b class="num">' + time + tag + '</b>' +
+            '<small class="num">' + kind + ' • ' + (s.items || []).length + ' قلم</small></div>' +
+            '<div class="lt num" style="color:' + (s.total < 0 ? "var(--danger)" : "var(--primary)") + '">' + money(s.total) + '</div></div>';
+        }).join("");
+    var net = 0; list.forEach(function (s) { net += s.total; });
+    openSheet(
+      '<h2>فروش‌های امروز</h2>' +
+      '<div class="sumbox"><div class="sumrow total"><span>مجموع امروز</span><span class="num">' + money(net) + '</span></div></div>' +
+      '<p style="color:var(--ink-soft);font-size:13px;margin:-2px 0 10px">اگر فروشی غلط ثبت شد، «برگشتی» را بزنید. فروش پاک نمی‌شود؛ اصلاحیه ثبت می‌گردد.</p>' +
+      '<div style="max-height:46vh;overflow-y:auto">' + rows + '</div>' +
+      '<div class="actions"><button class="primary" data-close>بستن</button></div>'
+    );
+  }
+
+  function confirmReturn(s) {
+    openSheet(
+      '<h2>برگشتی فروش</h2>' +
+      '<p style="margin:-6px 0 14px;font-size:15px">این فروش به مبلغ <b class="num">' + money(s.total) + '</b> برگشت داده شود؟<br>' +
+      '<small style="color:var(--ink-soft)">موجودی پس می‌آید' + (s.paymentType === "credit" ? " و قرض مشتری کم می‌شود" : "") + '. فروش پاک نمی‌شود.</small></p>' +
+      '<div class="actions"><button class="ghost" data-close>نی</button>' +
+        '<button class="primary" id="retOk" style="background:var(--danger)">بلی، برگشتی</button></div>'
+    );
+    $("#retOk").addEventListener("click", function () { returnSale(s); });
   }
 
   // ---------- Products list ----------
@@ -664,7 +886,12 @@
       el.innerHTML = '<div class="empty"><div class="big">📦</div><p>هنوز جنسی ثبت نشده.<br>دکمه «جنس جدید» را بزنید.</p></div>';
       return;
     }
-    var sorted = products.slice().sort(function (a, b) { return a.name.localeCompare(b.name, "fa"); });
+    // ستاره‌دارها اول تا در فهرست هم زود پیدا شوند
+    var sorted = products.slice().sort(function (a, b) {
+      var sa = a.star ? 0 : 1, sb = b.star ? 0 : 1;
+      if (sa !== sb) return sa - sb;
+      return a.name.localeCompare(b.name, "fa");
+    });
     el.innerHTML = sorted.map(function (p) {
       var cls = typeCls(p.type);
       var ico = typeIcon(p.type);
@@ -673,6 +900,7 @@
       var expWarn = (dte !== null && dte <= EXPIRY_WARN_DAYS)
         ? '<span class="expbadge">⏰ ' + expiryLabel(dte) + '</span>' : '';
       return '<div class="prow ' + cls + '">' +
+        '<button class="star ' + (p.star ? "on" : "") + '" data-star="' + p.id + '" aria-label="پرفروش">⭐</button>' +
         '<div class="tapzone" data-edit="' + p.id + '" role="button" tabindex="0">' +
           '<div class="ico">' + ico + '</div>' +
           '<div class="info"><b>' + esc(p.name) + '</b><small>' + typeLabel(p.type) + ' • فروش: ' + money(p.sell) + '</small>' + (expWarn ? '<br>' + expWarn : '') + '</div>' +
@@ -700,29 +928,85 @@
       '<div class="qbtns">' + presetHtml + '</div>' +
       '<div class="field"><label>یا مقدار دلخواه (' + u + ')</label>' +
         '<input id="qCustom" type="number" inputmode="decimal" step="any" min="0" placeholder="0" /></div>' +
+      '<div class="field"><label>یا به اندازهٔ پیسه (افغانی)</label>' +
+        '<input id="qMoney" type="number" inputmode="decimal" step="any" min="0" placeholder="مثلاً: ۵۰" />' +
+        '<small id="qMoneyOut" style="display:block;margin-top:6px;color:var(--ink-soft);font-size:14px">مقدار: —</small></div>' +
       '<div class="actions"><button class="ghost" data-close>لغو</button>' +
         '<button class="primary" id="qAdd">＋ اضافه به سبد</button></div>'
     );
     sheet.querySelectorAll(".qbtns button").forEach(function (b) {
       b.addEventListener("click", function () { addToCart(p.id, parseFloat(b.dataset.q)); closeSheet(); });
     });
+    // مقدار از روی پیسه: مقدار = پیسه ÷ قیمت فی واحد
+    function moneyQty() {
+      var m = parseFloat($("#qMoney").value);
+      if (!(m > 0) || !(p.sell > 0)) return 0;
+      return +(m / p.sell).toFixed(3);
+    }
+    $("#qMoney").addEventListener("input", function () {
+      var q = moneyQty();
+      $("#qMoneyOut").textContent = q > 0 ? "مقدار: " + qtyUnit(q, p.unit) : "مقدار: —";
+      if (q > 0) $("#qCustom").value = "";
+    });
+    $("#qCustom").addEventListener("input", function () {
+      if ($("#qCustom").value !== "") { $("#qMoney").value = ""; $("#qMoneyOut").textContent = "مقدار: —"; }
+    });
     $("#qAdd").addEventListener("click", function () {
-      var v = parseFloat($("#qCustom").value); if (v > 0) { addToCart(p.id, v); closeSheet(); }
+      var v = parseFloat($("#qCustom").value);
+      if (!(v > 0)) v = moneyQty();
+      if (v > 0) { addToCart(p.id, v); closeSheet(); }
     });
     setTimeout(function () { $("#qCustom").focus(); }, 60);
   }
 
+  // آخرین مشتریان قرضی — برای زدن با یک انگشت بدون تایپ
+  function recentCustomers(n) {
+    var seen = {}, out = [];
+    // تازه‌ترین اول؛ اگر تاریخ یکسان بود، آنکه بعدتر ثبت شده تازه‌تر است
+    var byDate = sales.map(function (s, i) { return { s: s, i: i }; })
+      .filter(function (x) { return x.s.paymentType === "credit" && x.s.customerId; })
+      .sort(function (a, b) {
+        var d = (b.s.date || "").localeCompare(a.s.date || "");
+        return d !== 0 ? d : b.i - a.i;
+      })
+      .map(function (x) { return x.s; });
+    byDate.forEach(function (s) {
+      if (out.length >= n || seen[s.customerId]) return;
+      var c = findC(s.customerId); if (!c) return;
+      seen[s.customerId] = 1; out.push(c);
+    });
+    // اگر کم بود، از فهرست مشتریان پر شود
+    customers.forEach(function (c) { if (out.length < n && !seen[c.id]) { seen[c.id] = 1; out.push(c); } });
+    return out;
+  }
+
   // Credit customer dialog
   function openCreditDialog() {
+    var recents = recentCustomers(6);
+    var recentHtml = recents.length === 0 ? "" :
+      '<label style="font-size:14px;font-weight:800;color:var(--ink-soft)">مشتریان اخیر</label>' +
+      '<div class="chips" id="recentCusts" style="flex-wrap:wrap;margin:6px 0 12px">' +
+      recents.map(function (c) {
+        return '<button type="button" data-cust="' + esc(c.name) + '" style="flex:0 1 auto;padding:8px 12px">' + esc(c.name) + '</button>';
+      }).join("") + '</div>';
     openSheet(
       '<h2>فروش قرض</h2>' +
       '<div class="field"><label>نام مشتری (حتمی)</label>' +
         '<input id="custName" type="text" placeholder="مثلاً: احمد" />' +
         '<div class="err" id="eCustName">نام مشتری را بنویسید — ورنه قرض در دفتر ثبت نمی‌شود</div></div>' +
+      recentHtml +
       '<button class="addline" id="miscCust" style="margin:0 0 12px">👤 مشتری «متفرقه»</button>' +
       '<div class="actions"><button class="ghost" data-close>لغو</button>' +
         '<button class="primary" id="creditOk">◔ ثبت قرض</button></div>'
     );
+    if ($("#recentCusts")) {
+      $("#recentCusts").addEventListener("click", function (e) {
+        var b = e.target.closest("[data-cust]"); if (!b) return;
+        $("#custName").value = b.dataset.cust;
+        $("#eCustName").classList.remove("show");
+        buzz();
+      });
+    }
     $("#miscCust").addEventListener("click", function () { $("#custName").value = "متفرقه"; });
     $("#creditOk").addEventListener("click", function () {
       var nm = $("#custName").value.trim();
@@ -1851,12 +2135,51 @@
     if (e.key === "Enter" || e.key === " ") { var t = e.target.closest(".tile"); if (t) { e.preventDefault(); onTileTap(t.dataset.id); } }
   });
   $("#cartArea").addEventListener("click", function (e) {
-    var b = e.target.closest("[data-rem]"); if (b) removeLine(b.dataset.rem);
+    var b = e.target.closest("[data-rem]"); if (b) { removeLine(b.dataset.rem); return; }
+    var d = e.target.closest("[data-dec]"); if (d) { bumpLine(d.dataset.dec, -1); return; }
+    var i = e.target.closest("[data-inc]"); if (i) { bumpLine(i.dataset.inc, +1); return; }
+  });
+  $("#cartClear").addEventListener("click", function () {
+    if (cart.length === 0) return;
+    cart = []; clearChange(); renderCart(); buzz(20); toast("سبد پاک شد");
+  });
+  $("#changeToggle").addEventListener("click", function () {
+    changeOpen = !changeOpen;
+    this.classList.toggle("on", changeOpen);
+    renderCart();
+    if (changeOpen) setTimeout(function () { $("#paidAmt").focus(); }, 40);
+  });
+  $("#paidAmt").addEventListener("input", renderChange);
+  $("#paidClr").addEventListener("click", function () { clearChange(); $("#paidAmt").focus(); });
+  $("#paidChips").addEventListener("click", function (e) {
+    var b = e.target.closest("button"); if (!b) return;
+    var inp = $("#paidAmt");
+    if (b.dataset.exact) inp.value = cartTotal();
+    else inp.value = (parseFloat(inp.value) || 0) + parseFloat(b.dataset.add);
+    renderChange(); buzz();
+  });
+  $("#btnTodaySales").addEventListener("click", openTodaySales);
+  // برگشتی از داخل شیت «فروش‌های امروز» (یک‌بار ثبت می‌شود)
+  sheet.addEventListener("click", function (e) {
+    var b = e.target.closest("[data-ret]"); if (!b) return;
+    var s = null;
+    for (var i = 0; i < sales.length; i++) if (sales[i].id === b.dataset.ret) { s = sales[i]; break; }
+    if (s) confirmReturn(s);
   });
   $("#btnCash").addEventListener("click", function () { finishSale("cash", null); });
   $("#btnCredit").addEventListener("click", openCreditDialog);
 
   $("#prodList").addEventListener("click", function (e) {
+    var st = e.target.closest("[data-star]");
+    if (st) {
+      var ps = findP(st.dataset.star);
+      if (ps) {
+        ps.star = !ps.star; save(LS_P, products);
+        renderProducts(); renderSaleGrid(); buzz();
+        toast(ps.star ? "«" + ps.name + "» پرفروش شد ⭐" : "از پرفروش‌ها برداشته شد");
+      }
+      return;
+    }
     var d = e.target.closest("[data-del]"); if (d) { var p = findP(d.dataset.del); if (p) confirmDelete(p); return; }
     var ed = e.target.closest("[data-edit]"); if (ed) { var pe = findP(ed.dataset.edit); if (pe) openProductForm(pe); }
   });

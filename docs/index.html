@@ -245,6 +245,19 @@
   .tile.oosdim { opacity: .45; }
   .retbadge { font-size: 11px; font-weight: 800; padding: 2px 7px; border-radius: 7px;
     background: var(--danger-soft); color: var(--danger); }
+
+  /* حسابگر کارتن و نشان «تخمینی» */
+  .cartonlink {
+    margin-top: 8px; border: 2px dashed var(--line); background: transparent;
+    color: var(--ink-soft); font: inherit; font-size: 13.5px; font-weight: 800;
+    padding: 7px 12px; border-radius: 10px; cursor: pointer;
+  }
+  .cartonlink.on { border-style: solid; border-color: var(--primary); color: var(--primary); }
+  .estrow { display: flex; align-items: center; gap: 9px; margin-top: 12px;
+    font-size: 14.5px; cursor: pointer; }
+  .estrow input { width: 20px; height: 20px; flex: 0 0 auto; accent-color: var(--credit); }
+  .estbadge { font-size: 11px; font-weight: 800; padding: 2px 7px; border-radius: 7px;
+    background: var(--credit-soft); color: var(--credit); }
   .citem { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--line); }
   .citem:last-child { border-bottom: 0; }
   .citem .x {
@@ -960,7 +973,9 @@
     if (type === "credit" && !(customerName || "").trim()) { toast("برای فروش قرض نام مشتری لازم است", true); return; }
     var items = cart.map(function (l) {
       var p = findP(l.productId);
-      return { productId: p.id, productName: p.name, quantity: l.qty, sellPrice: p.sell, buyPrice: p.buy || 0 };
+      // اگر قیمت خرید تخمینی بود، در خود فروش نشانی می‌شود تا گزارش راست بگوید
+      return { productId: p.id, productName: p.name, quantity: l.qty, sellPrice: p.sell,
+               buyPrice: p.buy || 0, buyEst: !!p.buyEstimated };
     });
     var total = cartTotal();
     var nm = (customerName || "").trim();
@@ -1081,7 +1096,9 @@
         '<button class="star ' + (p.star ? "on" : "") + '" data-star="' + p.id + '" aria-label="پرفروش">⭐</button>' +
         '<div class="tapzone" data-edit="' + p.id + '" role="button" tabindex="0">' +
           '<div class="ico">' + ico + '</div>' +
-          '<div class="info"><b>' + esc(p.name) + '</b><small>' + typeLabel(p.type) + ' • فروش: ' + money(p.sell) + '</small>' + (expWarn ? '<br>' + expWarn : '') + '</div>' +
+          '<div class="info"><b>' + esc(p.name) + '</b><small>' + typeLabel(p.type) + ' • فروش: ' + money(p.sell) + '</small>' +
+            (p.buyEstimated ? '<br><span class="estbadge">قیمت خرید تخمینی</span>' : '') +
+            (expWarn ? '<br>' + expWarn : '') + '</div>' +
         '</div>' +
         '<div class="qty"><div class="q num ' + (low ? "low" : "") + '">' + qtyUnit(p.qty, p.unit) + '</div><small>' + (low ? "موجود نیست" : "موجود") + '</small></div>' +
         '<button class="del" data-del="' + p.id + '" aria-label="حذف">🗑</button>' +
@@ -1215,7 +1232,21 @@
           '<button type="button" data-u="piece" class="' + (p.unit === "piece" ? "on" : "") + '">دانه</button>' +
         '</div></div>' +
       '<div class="field"><label id="lBuy">قیمت خرید (افغانی)</label>' +
-        '<input id="fBuy" type="number" inputmode="decimal" step="any" min="0" value="' + p.buy + '" placeholder="0" /></div>' +
+        '<input id="fBuy" type="number" inputmode="decimal" step="any" min="0" value="' + p.buy + '" placeholder="0" />' +
+        // حسابگر کارتن: قیمت کارتن ÷ تعداد داخلش = قیمت فی دانه
+        '<button type="button" class="cartonlink" id="cartonToggle">🧮 حساب از روی کارتن</button>' +
+        '<div id="cartonBox" style="display:none;margin-top:8px">' +
+          '<div style="display:flex;gap:8px">' +
+            '<input id="cPrice" type="number" inputmode="decimal" step="any" min="0" placeholder="قیمت کارتن" style="flex:1 1 0;min-width:0" />' +
+            '<input id="cCount" type="number" inputmode="decimal" step="any" min="0" placeholder="تعداد داخل" style="flex:1 1 0;min-width:0" />' +
+          '</div>' +
+          '<small id="cOut" style="display:block;margin-top:6px;color:var(--ink-soft);font-size:13.5px">فی دانه: —</small>' +
+        '</div>' +
+        // نشان «تخمینی» برای وقتی قیمت خرید را دقیق نمی‌دانید
+        '<label class="estrow"><input type="checkbox" id="fEst"' + (p.buyEstimated ? " checked" : "") + ' />' +
+          '<span>قیمت خرید <b>تخمینی</b> است (دقیق نمی‌دانم)</span></label>' +
+        '<small style="display:block;margin-top:4px;color:var(--ink-soft);font-size:12.5px">بعد از اولین خرید واقعی این جنس، نشان خودش برداشته می‌شود.</small>' +
+      '</div>' +
       '<div class="field"><label id="lSell">قیمت فروش (افغانی)</label>' +
         '<input id="fSell" type="number" inputmode="decimal" step="any" min="0" value="' + p.sell + '" placeholder="0" />' +
         '<div class="err" id="eSell">قیمت فروش را درست بنویسید</div></div>' +
@@ -1263,6 +1294,27 @@
       var out = $("#fExpJ");
       if (out) out.textContent = this.value ? "شمسی: " + fmtDateLong(this.value) : "";
     });
+
+    // حسابگر کارتن → قیمت فی دانه
+    $("#cartonToggle").addEventListener("click", function () {
+      var box = $("#cartonBox");
+      var open = box.style.display === "none";
+      box.style.display = open ? "block" : "none";
+      this.classList.toggle("on", open);
+      if (open) setTimeout(function () { $("#cPrice").focus(); }, 40);
+    });
+    function calcCarton() {
+      var pr = parseFloat($("#cPrice").value), cn = parseFloat($("#cCount").value);
+      if (pr > 0 && cn > 0) {
+        var each = +(pr / cn).toFixed(3);
+        $("#cOut").textContent = "فی دانه: " + money(each) + " — در خانهٔ قیمت خرید گذاشته شد ✓";
+        $("#fBuy").value = each;
+      } else {
+        $("#cOut").textContent = "فی دانه: —";
+      }
+    }
+    $("#cPrice").addEventListener("input", calcCarton);
+    $("#cCount").addEventListener("input", calcCarton);
     $("#fSave").addEventListener("click", function () {
       var name = $("#fName").value.trim();
       var sell = parseFloat($("#fSell").value);
@@ -1277,7 +1329,9 @@
         buy: parseFloat($("#fBuy").value) || 0,
         sell: sell,
         qty: parseFloat($("#fQty").value) || 0,
-        expiry: $("#fExp").value || ""
+        expiry: $("#fExp").value || "",
+        buyEstimated: $("#fEst").checked,
+        star: !!p.star
       };
       if (editing) {
         for (var i = 0; i < products.length; i++) if (products[i].id === p.id) { products[i] = rec; break; }
@@ -1538,7 +1592,14 @@
       // قیمت خرید = اوسط وزنی موجودی کهنه و خرید نو (اگر موجودی نبود، قیمت نو)
       var oldQty = p.qty > 0 ? p.qty : 0;
       var oldBuy = p.buy || 0;
-      p.buy = oldQty > 0 ? +(((oldQty * oldBuy) + (l.qty * l.buyPrice)) / (oldQty + l.qty)).toFixed(2) : l.buyPrice;
+      // اگر قیمت کهنه تخمینی بود، دیگر با آن اوسط گرفته نمی‌شود —
+      // قیمت واقعی این خرید جای آن را می‌گیرد و نشان «تخمینی» برداشته می‌شود.
+      if (p.buyEstimated) {
+        p.buy = l.buyPrice;
+        p.buyEstimated = false;
+      } else {
+        p.buy = oldQty > 0 ? +(((oldQty * oldBuy) + (l.qty * l.buyPrice)) / (oldQty + l.qty)).toFixed(2) : l.buyPrice;
+      }
       p.qty = +(p.qty + l.qty).toFixed(3);
     });
     // قرض تامین‌کننده جدا زیاد نمی‌شود؛ «باقی‌ماندهٔ» خودِ فاکتور رویداد آن است
@@ -1823,7 +1884,7 @@
   function computeReport(period) {
     var start = periodStart(period);
     var r = { totalSales: 0, cash: 0, credit: 0, cogs: 0, wasteLoss: 0, expenses: 0, profit: 0, netProfit: 0,
-              cashIn: 0, cashOut: 0, cashBox: 0, perProduct: {} };
+              cashIn: 0, cashOut: 0, cashBox: 0, estCogs: 0, estNames: {}, perProduct: {} };
     sales.forEach(function (s) {
       if (new Date(s.date) < start) return;
       r.totalSales += s.total;
@@ -1835,6 +1896,9 @@
         var cost = it.quantity * buy;
         var prof = it.quantity * (it.sellPrice - buy);
         r.cogs += cost;
+        // اگر قیمت خرید لحظهٔ فروش تخمینی بود (یا جنس هنوز تخمینی است)
+        var wasEst = (it.buyEst !== undefined) ? it.buyEst : (p ? !!p.buyEstimated : false);
+        if (wasEst) { r.estCogs += cost; r.estNames[it.productName] = 1; }
         var pp = r.perProduct[it.productId] || (r.perProduct[it.productId] = { name: it.productName, qty: 0, sales: 0, profit: 0 });
         pp.qty += it.quantity; pp.sales += it.quantity * it.sellPrice; pp.profit += prof;
       });
@@ -1865,6 +1929,17 @@
     return "همه";
   }
 
+  // اخطار صادقانه: چه اندازه از فایدهٔ این دوره روی قیمت تخمینی بنا است
+  function estNote(r) {
+    if (!(r.estCogs > 0)) return "";
+    var names = Object.keys(r.estNames);
+    var shown = names.slice(0, 3).join("، ") + (names.length > 3 ? " و " + (names.length - 3) + " جنس دیگر" : "");
+    return '<div class="warn-card" style="background:var(--credit-soft);border-color:var(--credit)">' +
+      '<div class="wi">≈</div><div class="wtx"><b>فایدهٔ این دوره کمی تخمینی است</b>' +
+      '<small style="color:var(--credit)">قیمت خرید ' + esc(shown) + ' تخمینی بود (' + money(r.estCogs) +
+      ' از قیمت تمام‌شد). بعد از اولین خرید واقعیِ این اجناس، رقم دقیق می‌شود.</small></div></div>';
+  }
+
   function renderReports(el) {
     var r = computeReport(reportPeriod);
     function seg(v, label) {
@@ -1888,6 +1963,7 @@
       '<div class="seg" id="rpToggle" style="margin:10px 14px 4px">' + seg("today", "امروز") + seg("month", "این ماه") + seg("all", "همه") + '</div>' +
       '<p style="text-align:center;color:var(--ink-soft);font-size:13px;margin:8px 14px 0">' + esc(periodLabel()) + '</p>' +
       (r.totalSales === 0 ? '<div class="warn-card" style="background:var(--credit-soft);border-color:var(--credit)"><div class="wi">ℹ️</div><div class="wtx"><b>در این دوره فروشی ثبت نشده</b><small style="color:var(--credit)">دورهٔ «همه» را ببینید یا یک فروش تازه ثبت کنید</small></div></div>' : '') +
+      estNote(r) +
       '<div style="padding:0 14px">' +
         '<div class="sumbox">' +
           row("مجموع فروش", r.totalSales) +

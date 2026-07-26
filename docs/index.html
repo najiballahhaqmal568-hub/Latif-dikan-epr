@@ -2069,6 +2069,24 @@
           '۳) از Settings → API، «Project URL» و «anon public» key را کاپی و اینجا بچسپانید.<br>' +
           '۴) نقش/کد دوکان را انتخاب، ذخیره و «روشن‌کردن سنک». در تلیفون برادر همان‌ها را با نقش «فقط دیدن» بگذارید.' +
         '</div>' +
+
+        '<label style="font-size:15px;font-weight:800;color:var(--ink-soft)">بک‌آپ در خود تیلفون</label>' +
+        '<p style="color:var(--ink-soft);font-size:13px;margin:6px 0 8px">یک فایل از تمام دیتا در تیلفون شما ذخیره می‌شود. پیش از هر کار بزرگ این را بگیرید.</p>' +
+        '<button class="addline" id="dlBackup" style="margin:0 0 18px">⬇️ گرفتن فایل بک‌آپ</button>' +
+
+        // ناحیهٔ خطرناک — جدا و با محافظت، تا اشتباهی زده نشود
+        '<div style="border:2px solid var(--danger);border-radius:14px;padding:14px;margin-bottom:20px">' +
+          '<b style="color:var(--danger);font-size:16px">⚠️ شروع نو (پاک‌کردن همه)</b>' +
+          '<p style="color:var(--ink-soft);font-size:13px;line-height:1.9;margin:8px 0 10px">' +
+            'وقتی آزمایش تمام شد و می‌خواهید دیتای واقعی دوکان را وارد کنید، این را بزنید.<br>' +
+            '<b style="color:var(--danger)">تمام اجناس، فروش‌ها، قرض‌ها، مصارف و شمارش‌ها پاک می‌شوند و پس نمی‌آیند.</b><br>' +
+            (cfg.enabled && cfg.role === "owner"
+              ? '<b style="color:var(--danger)">سنک روشن است — نسخهٔ آنلاین و آنچه برادر می‌بیند هم پاک می‌شود.</b><br>' : '') +
+            'اول فایل بک‌آپ را بگیرید. برای تأیید، در خانهٔ پایین کلمهٔ <b>پاک</b> را بنویسید.' +
+          '</p>' +
+          '<input id="wipeWord" type="text" placeholder="اینجا بنویسید: پاک" style="width:100%;font:inherit;font-size:16px;padding:10px;border:2px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink)" />' +
+          '<button class="wbtn" id="wipeBtn" style="width:100%;margin-top:10px;background:var(--danger);padding:12px">پاک‌کردن همه و شروع نو</button>' +
+        '</div>' +
       '</div>';
     el.querySelectorAll("#syncRole button").forEach(function (b) {
       b.addEventListener("click", function () {
@@ -2087,6 +2105,65 @@
     document.getElementById("syncSave").addEventListener("click", function () { persistSettings(); toast("تنظیمات ذخیره شد ✓"); });
     var onBtn = document.getElementById("syncOn"); if (onBtn) onBtn.addEventListener("click", function () { persistSettings(); syncStart(); });
     var offBtn = document.getElementById("syncOff"); if (offBtn) offBtn.addEventListener("click", syncStop);
+    document.getElementById("dlBackup").addEventListener("click", downloadBackup);
+    document.getElementById("wipeBtn").addEventListener("click", function () {
+      var w = (document.getElementById("wipeWord").value || "").trim();
+      if (w !== "پاک") { toast("برای تأیید، کلمهٔ «پاک» را بنویسید", true); return; }
+      confirmWipe();
+    });
+  }
+
+  // ---------- بک‌آپ و شروع نو ----------
+  // گرفتن فایل از تمام دیتا (برای نگه‌داشتن پیش از پاک‌کردن یا هر وقت دیگر)
+  function downloadBackup() {
+    try {
+      var data = collectData();
+      data.__backupDate = new Date().toISOString();
+      var blob = new Blob([JSON.stringify(data)], { type: "application/json" });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      var j = toJalali(new Date());
+      a.href = url;
+      a.download = "dukan-latif-" + (j ? j.jy + "-" + j.jm + "-" + j.jd : todayISO()) + ".json";
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+      toast("فایل بک‌آپ گرفته شد ✓");
+    } catch (e) {
+      toast("گرفتن بک‌آپ نشد: " + (e.message || e), true);
+    }
+  }
+
+  function confirmWipe() {
+    openSheet(
+      '<h2 style="color:var(--danger)">پاک‌کردن همه؟</h2>' +
+      '<p style="font-size:15px;line-height:2">تمام اجناس، فروش‌ها، قرض‌ها، مصارف، ضایعات و شمارش‌ها پاک می‌شوند.<br>' +
+      '<b style="color:var(--danger)">این کار پس نمی‌آید.</b><br>' +
+      '<small style="color:var(--ink-soft)">تنظیمات سنک دست‌نخورده می‌ماند.</small></p>' +
+      '<div class="actions"><button class="ghost" data-close>نی، لغو</button>' +
+        '<button class="primary" id="wipeOk" style="background:var(--danger)">بلی، پاک کن</button></div>'
+    );
+    $("#wipeOk").addEventListener("click", wipeAll);
+  }
+
+  // پاک‌کردن کامل — آرایه‌های خالی ذخیره می‌شوند (نه حذف کلید)، تا
+  // نمونه‌های آزمایشی دوباره ساخته نشوند.
+  function wipeAll() {
+    products = []; sales = []; suppliers = []; purchases = []; customers = [];
+    supPayments = []; custPayments = []; waste = []; expenses = []; stockCounts = [];
+    cart = [];
+    save0(LS_P, products); save0(LS_S, sales); save0(LS_SUP, suppliers);
+    save0(LS_PUR, purchases); save0(LS_CUST, customers); save0(LS_SPAY, supPayments);
+    save0(LS_CPAY, custPayments); save0(LS_WASTE, waste); save0(LS_EXP, expenses);
+    save0(LS_COUNTS, stockCounts);
+    localStorage.setItem(LS_SEED, "1"); // دیگر نمونهٔ آزمایشی ساخته نشود
+    invalidateDebts();
+    if (typeof syncOnLocalSave === "function") syncOnLocalSave(); // نسخهٔ آنلاین هم خالی شود
+    closeSheet();
+    moreView = null;
+    renderSaleGrid(); renderCart(); renderProducts(); renderPurchases();
+    renderDebts(); renderMore();
+    switchTab("products");
+    toast("همه پاک شد ✓ حالا اجناس واقعی را وارد کنید");
   }
 
   // ---------- Monthly stock count (شمارش ماهانه) ----------

@@ -551,7 +551,7 @@
     if (days === 0) return "امروز تیر می‌شود";
     return days + " روز تا خرابی";
   }
-  function reasonLabel(r) { return r === "expired" ? "تاریخ‌تیر" : "خراب"; }
+  function reasonLabel(r) { return r === "expired" ? "تاریخ‌تیر" : (r === "shortage" ? "کسری شمارش" : "خراب"); }
   function typeLabel(t) { return t === "weighted" ? "وزنی" : (t === "wifi" ? "وای‌فای" : "دانه‌ای"); }
   function typeIcon(t) { return t === "weighted" ? "⚖️" : (t === "wifi" ? "📶" : "🧃"); }
   function typeCls(t) { return t === "unit" ? "u" : "w"; }
@@ -630,6 +630,8 @@
 
   function finishSale(type, customerName) {
     if (cart.length === 0) return;
+    // فروش قرضی بدون نام اجازه ندارد — ورنه پول در دفتر قرض گم می‌شود
+    if (type === "credit" && !(customerName || "").trim()) { toast("برای فروش قرض نام مشتری لازم است", true); return; }
     var items = cart.map(function (l) {
       var p = findP(l.productId);
       return { productId: p.id, productName: p.name, quantity: l.qty, sellPrice: p.sell, buyPrice: p.buy || 0 };
@@ -714,14 +716,18 @@
   function openCreditDialog() {
     openSheet(
       '<h2>فروش قرض</h2>' +
-      '<div class="field"><label>نام مشتری (اختیاری)</label>' +
-        '<input id="custName" type="text" placeholder="مثلاً: احمد" /></div>' +
+      '<div class="field"><label>نام مشتری (حتمی)</label>' +
+        '<input id="custName" type="text" placeholder="مثلاً: احمد" />' +
+        '<div class="err" id="eCustName">نام مشتری را بنویسید — ورنه قرض در دفتر ثبت نمی‌شود</div></div>' +
+      '<button class="addline" id="miscCust" style="margin:0 0 12px">👤 مشتری «متفرقه»</button>' +
       '<div class="actions"><button class="ghost" data-close>لغو</button>' +
         '<button class="primary" id="creditOk">◔ ثبت قرض</button></div>'
     );
+    $("#miscCust").addEventListener("click", function () { $("#custName").value = "متفرقه"; });
     $("#creditOk").addEventListener("click", function () {
       var nm = $("#custName").value.trim();
-      closeSheet(); finishSale("credit", nm || null);
+      if (!nm) { $("#eCustName").classList.add("show"); return; }
+      closeSheet(); finishSale("credit", nm);
     });
     setTimeout(function () { $("#custName").focus(); }, 60);
   }
@@ -1052,7 +1058,12 @@
         products.push({ id: l.productId, name: l.name, type: l.type || "unit", unit: l.unit, buy: l.buyPrice, sell: l.sellPrice || 0, qty: 0, expiry: "" });
       }
       var p = findP(l.productId);
-      if (p) { p.qty = +(p.qty + l.qty).toFixed(3); p.buy = l.buyPrice; }
+      if (!p) return;
+      // قیمت خرید = اوسط وزنی موجودی کهنه و خرید نو (اگر موجودی نبود، قیمت نو)
+      var oldQty = p.qty > 0 ? p.qty : 0;
+      var oldBuy = p.buy || 0;
+      p.buy = oldQty > 0 ? +(((oldQty * oldBuy) + (l.qty * l.buyPrice)) / (oldQty + l.qty)).toFixed(2) : l.buyPrice;
+      p.qty = +(p.qty + l.qty).toFixed(3);
     });
     sup.debt = +(sup.debt + remaining).toFixed(2);
 
@@ -1079,12 +1090,13 @@
     var sorted = suppliers.slice().sort(function (a, b) { return b.debt - a.debt; });
     el.innerHTML = addBtn + sorted.map(function (s) {
       var low = s.debt > 0;
+      var lbl = s.debt > 0 ? "قرض ما" : (s.debt < 0 ? "پیش‌پرداخت ما" : "تصفیه");
       return '<div class="prow u">' +
         '<div class="tapzone" data-supplier="' + s.id + '" role="button" tabindex="0">' +
           '<div class="ico">🤝</div>' +
           '<div class="info"><b>' + esc(s.name) + '</b><small>' + (s.phone ? esc(s.phone) : "بدون نمبر") + '</small></div>' +
         '</div>' +
-        '<div class="qty"><div class="q num ' + (low ? "low" : "") + '">' + money(s.debt) + '</div><small>' + (low ? "قرض ما" : "تصفیه") + '</small></div>' +
+        '<div class="qty"><div class="q num ' + (low ? "low" : "") + '">' + money(Math.abs(s.debt)) + '</div><small>' + lbl + '</small></div>' +
         '</div>';
     }).join("");
   }
@@ -1099,15 +1111,15 @@
     openSheet(
       '<h2>' + esc(s.name) + '</h2>' +
       (s.phone ? '<p style="margin:-6px 0 10px;color:var(--ink-soft)" class="num">' + esc(s.phone) + '</p>' : '') +
-      '<div class="sumbox"><div class="sumrow total"><span>مجموع قرض ما</span><span class="rem num">' + money(s.debt) + '</span></div></div>' +
-      (s.debt > 0 ? '<button class="addline" id="payBtn" style="border-style:solid;background:var(--primary);color:var(--primary-ink);border-color:var(--primary)">💵 پرداخت به تامین‌کننده</button>' : '') +
+      '<div class="sumbox"><div class="sumrow total"><span>' + (s.debt < 0 ? "پیش‌پرداخت ما نزد او" : "مجموع قرض ما") + '</span><span class="rem num">' + money(Math.abs(s.debt)) + '</span></div></div>' +
+      '<button class="addline" id="payBtn" style="border-style:solid;background:var(--primary);color:var(--primary-ink);border-color:var(--primary)">💵 پرداخت به تامین‌کننده</button>' +
       '<label style="font-size:15px;font-weight:800;color:var(--ink-soft)">رسیدهای پرداخت</label>' +
       '<div style="margin-top:6px">' + payReceiptRows(supPayments, "supplierId", s.id) + '</div>' +
       '<label style="font-size:15px;font-weight:800;color:var(--ink-soft)">فاکتورها</label>' +
       '<div style="margin-top:6px">' + rows + '</div>' +
       '<div class="actions"><button class="primary" data-close>بستن</button></div>'
     );
-    if (s.debt > 0) $("#payBtn").addEventListener("click", function () { openPayDialog(s); });
+    $("#payBtn").addEventListener("click", function () { openPayDialog(s); });
   }
 
   // سطرهای رسید پرداخت/دریافت (تاریخ + مبلغ)
@@ -1132,7 +1144,8 @@
     $("#payOk").addEventListener("click", function () {
       var amt = parseFloat($("#payAmt").value) || 0;
       if (amt <= 0) return;
-      s.debt = +Math.max(0, s.debt - amt).toFixed(2);
+      // اگر بیشتر از قرض پرداخت شد، باقی «پیش‌پرداخت» می‌ماند (منفی) و گم نمی‌شود
+      s.debt = +(s.debt - amt).toFixed(2);
       supPayments.push({ id: id(), supplierId: s.id, date: new Date().toISOString(), amount: amt });
       save(LS_SUP, suppliers); save(LS_SPAY, supPayments);
       renderSuppliers();
@@ -1153,12 +1166,13 @@
     var sorted = customers.slice().sort(function (a, b) { return b.debt - a.debt; });
     el.innerHTML = addBtn + sorted.map(function (c) {
       var low = c.debt > 0;
+      var lbl = c.debt > 0 ? "قرض او" : (c.debt < 0 ? "پیش‌پرداخت او" : "تصفیه");
       return '<div class="prow w">' +
         '<div class="tapzone" data-customer="' + c.id + '" role="button" tabindex="0">' +
           '<div class="ico">👤</div>' +
           '<div class="info"><b>' + esc(c.name) + '</b><small>' + (c.phone ? esc(c.phone) : "بدون نمبر") + '</small></div>' +
         '</div>' +
-        '<div class="qty"><div class="q num ' + (low ? "low" : "") + '">' + money(c.debt) + '</div><small>' + (low ? "قرض او" : "تصفیه") + '</small></div>' +
+        '<div class="qty"><div class="q num ' + (low ? "low" : "") + '">' + money(Math.abs(c.debt)) + '</div><small>' + lbl + '</small></div>' +
         '</div>';
     }).join("");
   }
@@ -1206,15 +1220,15 @@
     openSheet(
       '<h2>' + esc(c.name) + '</h2>' +
       (c.phone ? '<p style="margin:-6px 0 10px;color:var(--ink-soft)" class="num">' + esc(c.phone) + '</p>' : '') +
-      '<div class="sumbox"><div class="sumrow total"><span>مجموع قرض او به ما</span><span class="rem num">' + money(c.debt) + '</span></div></div>' +
-      (c.debt > 0 ? '<button class="addline" id="cPayBtn" style="border-style:solid;background:var(--primary);color:var(--primary-ink);border-color:var(--primary)">💵 دریافت پرداخت از مشتری</button>' : '') +
+      '<div class="sumbox"><div class="sumrow total"><span>' + (c.debt < 0 ? "پیش‌پرداخت او نزد ما" : "مجموع قرض او به ما") + '</span><span class="rem num">' + money(Math.abs(c.debt)) + '</span></div></div>' +
+      '<button class="addline" id="cPayBtn" style="border-style:solid;background:var(--primary);color:var(--primary-ink);border-color:var(--primary)">💵 دریافت پرداخت از مشتری</button>' +
       '<label style="font-size:15px;font-weight:800;color:var(--ink-soft)">رسیدهای دریافت</label>' +
       '<div style="margin-top:6px">' + payReceiptRows(custPayments, "customerId", c.id) + '</div>' +
       '<label style="font-size:15px;font-weight:800;color:var(--ink-soft)">فروش‌های قرضی</label>' +
       '<div style="margin-top:6px">' + rows + '</div>' +
       '<div class="actions"><button class="primary" data-close>بستن</button></div>'
     );
-    if (c.debt > 0) $("#cPayBtn").addEventListener("click", function () { openCustomerPay(c); });
+    $("#cPayBtn").addEventListener("click", function () { openCustomerPay(c); });
   }
 
   function openCustomerPay(c) {
@@ -1229,7 +1243,8 @@
     $("#cPayOk").addEventListener("click", function () {
       var amt = parseFloat($("#cPayAmt").value) || 0;
       if (amt <= 0) return;
-      c.debt = +Math.max(0, c.debt - amt).toFixed(2);
+      // اگر بیشتر از قرض داد، باقی «پیش‌پرداخت» می‌ماند (منفی) و گم نمی‌شود
+      c.debt = +(c.debt - amt).toFixed(2);
       custPayments.push({ id: id(), customerId: c.id, date: new Date().toISOString(), amount: amt });
       save(LS_CUST, customers); save(LS_CPAY, custPayments);
       renderCustomers();
@@ -1302,7 +1317,8 @@
 
   function computeReport(period) {
     var start = periodStart(period);
-    var r = { totalSales: 0, cash: 0, credit: 0, cogs: 0, wasteLoss: 0, expenses: 0, profit: 0, perProduct: {} };
+    var r = { totalSales: 0, cash: 0, credit: 0, cogs: 0, wasteLoss: 0, expenses: 0, profit: 0, netProfit: 0,
+              cashIn: 0, cashOut: 0, cashBox: 0, perProduct: {} };
     sales.forEach(function (s) {
       if (new Date(s.date) < start) return;
       r.totalSales += s.total;
@@ -1321,6 +1337,16 @@
     waste.forEach(function (w) { if (new Date(w.date) >= start) r.wasteLoss += w.quantity * w.buyPrice; });
     expenses.forEach(function (x) { if (new Date(x.date) >= start) r.expenses += x.amount; });
     r.profit = r.totalSales - r.cogs - r.wasteLoss;
+    r.netProfit = r.profit - r.expenses;
+
+    // صندوق نقد: پیسه‌ای که باید در دست باشد
+    // داخل = فروش نقد + دریافت از مشتری | خارج = پرداخت نقد فاکتور + پرداخت به تامین‌کننده + مصارف خانه
+    r.cashIn = r.cash;
+    custPayments.forEach(function (x) { if (new Date(x.date) >= start) r.cashIn += x.amount; });
+    purchases.forEach(function (pu) { if (new Date(pu.date) >= start) r.cashOut += (pu.paid || 0); });
+    supPayments.forEach(function (x) { if (new Date(x.date) >= start) r.cashOut += x.amount; });
+    r.cashOut += r.expenses;
+    r.cashBox = r.cashIn - r.cashOut;
     return r;
   }
 
@@ -1361,7 +1387,15 @@
           '<div class="sumrow total"><span>فایدهٔ دوکان</span><span class="num" style="color:' + (r.profit >= 0 ? "var(--primary)" : "var(--danger)") + '">' + money(r.profit) + '</span></div>' +
         '</div>' +
         '<div class="sumbox">' +
-          row("مصارف خانه (جدا)", r.expenses) +
+          row("مصارف خانه", r.expenses) +
+          '<div class="sumrow total"><span>فایدهٔ نهایی (بعد از مصارف خانه)</span><span class="num" style="color:' + (r.netProfit >= 0 ? "var(--primary)" : "var(--danger)") + '">' + money(r.netProfit) + '</span></div>' +
+        '</div>' +
+        '<div class="sumbox">' +
+          row("پیسهٔ داخل‌شده (نقد + دریافت قرض)", r.cashIn) +
+          row("پیسهٔ خارج‌شده (خرید نقد + پرداخت قرض + مصارف)", r.cashOut) +
+          '<div class="sumrow total"><span>صندوق نقد (باید در دست باشد)</span><span class="num" style="color:' + (r.cashBox >= 0 ? "var(--primary)" : "var(--danger)") + '">' + money(r.cashBox) + '</span></div>' +
+        '</div>' +
+        '<div class="sumbox">' +
           '<div class="sumrow"><span>قرض مشتری‌ها (فعلی)</span><span class="rem num">' + money(custDebtTotal()) + '</span></div>' +
           '<div class="sumrow"><span>قرض تامین‌کننده (فعلی)</span><span class="rem num">' + money(supDebtTotal()) + '</span></div>' +
         '</div>' +
@@ -1574,9 +1608,10 @@
 
   function saveCount() {
     var mk = monthKey();
-    var changed = 0, diffs = 0;
-    // حذف رکوردهای همین ماه (جایگزینی)
+    var changed = 0, diffs = 0, shortLoss = 0;
+    // حذف رکوردهای همین ماه (جایگزینی) — ضایعات کسری همین ماه هم پاک شود تا دوباره حساب نشود
     stockCounts = stockCounts.filter(function (c) { return c.month !== mk; });
+    waste = waste.filter(function (w) { return w.countMonth !== mk; });
     products.forEach(function (p) {
       var inp = document.querySelector('[data-cnt="' + p.id + '"]');
       if (!inp) return;
@@ -1587,12 +1622,19 @@
       if (diff !== 0) {
         stockCounts.push({ id: id(), month: mk, productId: p.id, productName: p.name, unit: p.unit, calculated: calc, counted: counted, difference: diff, date: new Date().toISOString() });
         diffs++;
+        // کسری (کمتر از کتاب) = ضرر واقعی → در ضایعات ثبت شود تا از فایده کم گردد.
+        // زیادی (بیشتر از کتاب) فقط موجودی را درست می‌کند و فایدهٔ ساختگی نمی‌سازد.
+        if (diff < 0) {
+          waste.push({ id: id(), productId: p.id, productName: p.name, unit: p.unit, quantity: -diff, buyPrice: p.buy || 0, date: new Date().toISOString(), reason: "shortage", countMonth: mk });
+          shortLoss += (-diff) * (p.buy || 0);
+        }
       }
       if (counted !== calc) { p.qty = counted; changed++; } // اصلاح موجودی به تعداد شمرده‌شده
     });
-    save(LS_COUNTS, stockCounts); save(LS_P, products);
+    save(LS_COUNTS, stockCounts); save(LS_P, products); save(LS_WASTE, waste);
     renderMore(); renderProducts(); renderSaleGrid();
-    toast(diffs === 0 ? "شمارش ثبت شد — هیچ فرقی نبود ✓" : ("شمارش ثبت شد — " + diffs + " قلم فرق داشت"));
+    toast(diffs === 0 ? "شمارش ثبت شد — هیچ فرقی نبود ✓"
+      : ("شمارش ثبت شد — " + diffs + " قلم فرق داشت" + (shortLoss > 0 ? " • ضرر کسری: " + money(shortLoss) : "")));
   }
 
   // ---------- WiFi (وای‌فای) ----------

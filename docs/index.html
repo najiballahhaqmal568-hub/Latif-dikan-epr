@@ -628,9 +628,112 @@
   function findC(cid) { for (var i = 0; i < customers.length; i++) if (customers[i].id === cid) return customers[i]; return null; }
   function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
   function $(s) { return document.querySelector(s); }
-  function fmtDate(iso) { if (!iso) return ""; var d = new Date(iso); if (isNaN(d)) return iso; var p = function (n) { return (n < 10 ? "0" : "") + n; }; return d.getFullYear() + "/" + p(d.getMonth() + 1) + "/" + p(d.getDate()); }
+  // ---------- تقویم هجری شمسی (نام ماه‌های افغانی) ----------
+  // تاریخ‌ها در دیتا همیشه میلادی (ISO) ذخیره می‌شوند؛ فقط نمایش و
+  // مرز ماه‌ها شمسی است. الگوریتم استاندارد جلالی (Borkowski).
+  var J_MONTHS = ["حمل", "ثور", "جوزا", "سرطان", "اسد", "سنبله",
+                  "میزان", "عقرب", "قوس", "جدی", "دلو", "حوت"];
+  var J_BREAKS = [-61, 9, 38, 199, 426, 686, 756, 818, 1111, 1181, 1210,
+                  1635, 2060, 2097, 2192, 2262, 2324, 2394, 2456, 3178];
+  // تقسیم و باقی‌مانده با «بریدن به‌سوی صفر» (نه گِردکردن به پایین) —
+  // الگوریتم جلالی بر همین بنا است و برای عددهای منفی فرق می‌کند.
+  function jdiv(a, b) { return Math.trunc(a / b); }
+  function jmod(a, b) { return a - Math.trunc(a / b) * b; }
+
+  function jalCal(jy, withoutLeap) {
+    var bl = J_BREAKS.length, gy = jy + 621, leapJ = -14, jp = J_BREAKS[0];
+    var jm, jump, leap, leapG, march, n, i;
+    if (jy < jp || jy >= J_BREAKS[bl - 1]) return null;
+    for (i = 1; i < bl; i += 1) {
+      jm = J_BREAKS[i]; jump = jm - jp;
+      if (jy < jm) break;
+      leapJ = leapJ + jdiv(jump, 33) * 8 + jdiv(jmod(jump, 33), 4);
+      jp = jm;
+    }
+    n = jy - jp;
+    leapJ = leapJ + jdiv(n, 33) * 8 + jdiv(jmod(n, 33) + 3, 4);
+    if (jmod(jump, 33) === 4 && jump - n === 4) leapJ += 1;
+    leapG = jdiv(gy, 4) - jdiv((jdiv(gy, 100) + 1) * 3, 4) - 150;
+    march = 20 + leapJ - leapG;
+    if (!withoutLeap) {
+      if (jump - n < 6) n = n - jump + jdiv(jump + 4, 33) * 33;
+      leap = jmod(jmod(n + 1, 33) - 1, 4);
+      if (leap === -1) leap = 4;
+    }
+    return { leap: leap, gy: gy, march: march };
+  }
+  function g2d(gy, gm, gd) {
+    var d = jdiv((gy + jdiv(gm - 8, 6) + 100100) * 1461, 4) +
+            jdiv(153 * jmod(gm + 9, 12) + 2, 5) + gd - 34840408;
+    return d - jdiv(jdiv(gy + 100100 + jdiv(gm - 8, 6), 100) * 3, 4) + 752;
+  }
+  function d2g(jdn) {
+    var j = 4 * jdn + 139361631;
+    j = j + jdiv(jdiv(4 * jdn + 183187720, 146097) * 3, 4) * 4 - 3908;
+    var i = jdiv(jmod(j, 1461), 4) * 5 + 308;
+    var gd = jdiv(jmod(i, 153), 5) + 1;
+    var gm = jmod(jdiv(i, 153), 12) + 1;
+    var gy = jdiv(j, 1461) - 100100 + jdiv(8 - gm, 6);
+    return { gy: gy, gm: gm, gd: gd };
+  }
+  function d2j(jdn) {
+    var gy = d2g(jdn).gy, jy = gy - 621, r = jalCal(jy, false);
+    if (!r) return null;
+    var jdn1f = g2d(gy, 3, r.march), jd, jm, k;
+    k = jdn - jdn1f;
+    if (k >= 0) {
+      if (k <= 185) return { jy: jy, jm: 1 + jdiv(k, 31), jd: jmod(k, 31) + 1 };
+      k -= 186;
+    } else {
+      jy -= 1; k += 179;
+      if (r.leap === 1) k += 1;
+    }
+    jm = 7 + jdiv(k, 30); jd = jmod(k, 30) + 1;
+    return { jy: jy, jm: jm, jd: jd };
+  }
+  function j2d(jy, jm, jd) {
+    var r = jalCal(jy, true);
+    if (!r) return null;
+    return g2d(r.gy, 3, r.march) + (jm - 1) * 31 - jdiv(jm, 7) * (jm - 7) + jd - 1;
+  }
+  // تاریخ میلادی → شمسی
+  function toJalali(d) { return d2j(g2d(d.getFullYear(), d.getMonth() + 1, d.getDate())); }
+  // شمسی → تاریخ میلادی (نیمه‌شب محلی)
+  function jalaliToDate(jy, jm, jd) {
+    var n = j2d(jy, jm, jd); if (n === null) return null;
+    var g = d2g(n);
+    return new Date(g.gy, g.gm - 1, g.gd, 0, 0, 0, 0);
+  }
+
+  function fmtDate(iso) {
+    if (!iso) return "";
+    var d = new Date(iso); if (isNaN(d)) return iso;
+    var j = toJalali(d); if (!j) return iso;
+    var p = function (n) { return (n < 10 ? "0" : "") + n; };
+    return j.jy + "/" + p(j.jm) + "/" + p(j.jd);
+  }
+  // برچسب خوانا: «۴ اسد ۱۴۰۵»
+  function fmtDateLong(iso) {
+    if (!iso) return "";
+    var d = new Date(iso); if (isNaN(d)) return iso;
+    var j = toJalali(d); if (!j) return iso;
+    return j.jd + " " + J_MONTHS[j.jm - 1] + " " + j.jy;
+  }
   function todayISO() { return new Date().toISOString().slice(0, 10); }
-  function monthKey() { var d = new Date(); var m = d.getMonth() + 1; return d.getFullYear() + "/" + (m < 10 ? "0" + m : m); }
+  // کلید ماه شمسی، مثل «1405/05»
+  function monthKeyOf(d) {
+    var j = toJalali(d); if (!j) return "";
+    return j.jy + "/" + (j.jm < 10 ? "0" + j.jm : j.jm);
+  }
+  function monthKey() { return monthKeyOf(new Date()); }
+  // نام ماه از روی کلید «1405/05» → «اسد ۱۴۰۵»
+  function monthKeyLabel(key) {
+    var m = /^(\d{3,4})\/(\d{2})$/.exec(key || "");
+    if (!m) return key || "";
+    var mi = parseInt(m[2], 10);
+    if (mi < 1 || mi > 12) return key;
+    return J_MONTHS[mi - 1] + " " + m[1];
+  }
   // روزهای مانده تا تاریخ خرابی (منفی = تیر شده). اگر تاریخ نبود null.
   function daysToExpiry(expiry) {
     if (!expiry) return null;
@@ -1044,7 +1147,9 @@
       '<div class="field"><label id="lQty">تعداد موجود</label>' +
         '<input id="fQty" type="number" inputmode="decimal" step="any" min="0" value="' + p.qty + '" placeholder="0" /></div>' +
       '<div class="field"><label id="lExp">تاریخ خرابی (اختیاری)</label>' +
-        '<input id="fExp" type="date" value="' + (p.expiry || "") + '" /></div>' +
+        '<input id="fExp" type="date" value="' + (p.expiry || "") + '" />' +
+        '<small id="fExpJ" style="display:block;margin-top:6px;color:var(--ink-soft);font-size:13.5px">' +
+          (p.expiry ? "شمسی: " + fmtDateLong(p.expiry) : "") + '</small></div>' +
       '<div class="actions">' +
         (editing ? '<button class="ghost" id="fDelete" style="color:var(--danger);border-color:var(--danger)">حذف</button>' : '<button class="ghost" data-close>لغو</button>') +
         '<button class="primary" id="fSave">💾 ' + (editing ? "ذخیره تغییرات" : "ثبت جنس") + '</button>' +
@@ -1078,6 +1183,11 @@
       });
     });
 
+    // نشان‌دادن معادل شمسی تاریخ خرابی
+    $("#fExp").addEventListener("input", function () {
+      var out = $("#fExpJ");
+      if (out) out.textContent = this.value ? "شمسی: " + fmtDateLong(this.value) : "";
+    });
     $("#fSave").addEventListener("click", function () {
       var name = $("#fName").value.trim();
       var sell = parseFloat($("#fSell").value);
@@ -1204,7 +1314,9 @@
       '<div class="field"><label>نمبر تیلفون (اختیاری)</label>' +
         '<input id="pPhone" type="text" inputmode="tel" value="' + esc(draft.phone) + '" placeholder="07..." /></div>' +
       '<div class="field"><label>تاریخ</label>' +
-        '<input id="pDate" type="date" value="' + (draft.date || "") + '" /></div>' +
+        '<input id="pDate" type="date" value="' + (draft.date || "") + '" />' +
+        '<small id="pDateJ" style="display:block;margin-top:6px;color:var(--ink-soft);font-size:13.5px">' +
+          (draft.date ? "شمسی: " + fmtDateLong(draft.date) : "") + '</small></div>' +
       '<label style="font-size:15px;font-weight:800;color:var(--ink-soft)">اجناس فاکتور</label>' +
       '<div style="margin-top:6px">' + lines + '</div>' +
       '<button class="addline" id="pAddLine">＋ افزودن جنس</button>' +
@@ -1240,6 +1352,11 @@
       b.addEventListener("click", function () { syncDraftInputs(); draft.lines.splice(+b.dataset.rline, 1); renderPurchaseForm(); });
     });
     $("#pPaid").addEventListener("input", recompute);
+    // نشان‌دادن معادل شمسی تاریخِ انتخاب‌شده (خود تقویم میلادی است)
+    $("#pDate").addEventListener("input", function () {
+      var out = $("#pDateJ");
+      if (out) out.textContent = this.value ? "شمسی: " + fmtDateLong(this.value) : "";
+    });
     $("#pAddLine").addEventListener("click", function () { syncDraftInputs(); openLinePicker(); });
     $("#pSave").addEventListener("click", savePurchase);
   }
@@ -1595,7 +1712,15 @@
   function periodStart(period) {
     var d = new Date(); d.setHours(0, 0, 0, 0);
     if (period === "today") return d;
-    if (period === "month") return new Date(d.getFullYear(), d.getMonth(), 1);
+    if (period === "month") {
+      // «این ماه» = ماه هجری شمسی (نه میلادی)
+      var j = toJalali(d);
+      if (j) {
+        var start = jalaliToDate(j.jy, j.jm, 1);
+        if (start) return start;
+      }
+      return new Date(d.getFullYear(), d.getMonth(), 1); // اگر تبدیل ناکام شد
+    }
     return new Date(0);
   }
 
@@ -1637,6 +1762,13 @@
   function custDebtTotal() { var s = 0; customers.forEach(function (c) { s += c.debt; }); return s; }
   function supDebtTotal() { var s = 0; suppliers.forEach(function (x) { s += x.debt; }); return s; }
 
+  // برچسب دوره با نام ماه شمسی، تا معلوم باشد «این ماه» کدام ماه است
+  function periodLabel() {
+    if (reportPeriod === "today") return "امروز — " + fmtDateLong(new Date().toISOString());
+    if (reportPeriod === "month") return "ماه " + monthKeyLabel(monthKey());
+    return "همه";
+  }
+
   function renderReports(el) {
     var r = computeReport(reportPeriod);
     function seg(v, label) {
@@ -1658,6 +1790,7 @@
     el.innerHTML =
       '<div class="subhead"><button class="back moreBack" aria-label="بازگشت">→</button><h3>گزارش‌ها</h3></div>' +
       '<div class="seg" id="rpToggle" style="margin:10px 14px 4px">' + seg("today", "امروز") + seg("month", "این ماه") + seg("all", "همه") + '</div>' +
+      '<p style="text-align:center;color:var(--ink-soft);font-size:13px;margin:8px 14px 0">' + esc(periodLabel()) + '</p>' +
       (r.totalSales === 0 ? '<div class="warn-card" style="background:var(--credit-soft);border-color:var(--credit)"><div class="wi">ℹ️</div><div class="wtx"><b>در این دوره فروشی ثبت نشده</b><small style="color:var(--credit)">دورهٔ «همه» را ببینید یا یک فروش تازه ثبت کنید</small></div></div>' : '') +
       '<div style="padding:0 14px">' +
         '<div class="sumbox">' +
@@ -1684,7 +1817,7 @@
           '<div class="sumrow"><span>قرض تامین‌کننده (فعلی)</span><span class="rem num">' + money(supDebtTotal()) + '</span></div>' +
         '</div>' +
       '</div>' +
-      '<div class="listhead">فایده هر جنس (' + (reportPeriod === "today" ? "امروز" : reportPeriod === "month" ? "این ماه" : "همه") + ')</div>' +
+      '<div class="listhead">فایده هر جنس (' + periodLabel() + ')</div>' +
       prodHtml;
   }
 
@@ -1878,16 +2011,40 @@
       : recorded.map(function (c) {
           var col = c.difference < 0 ? "var(--danger)" : "var(--primary)";
           var lbl = c.difference < 0 ? "کسر" : "زیادت";
-          return '<div class="iline"><div class="in"><b>' + esc(c.productName) + '</b><small class="num">ماه ' + c.month + ' • شمرده: ' + nf.format(c.counted) + ' / باید: ' + nf.format(c.calculated) + '</small></div>' +
+          return '<div class="iline"><div class="in"><b>' + esc(c.productName) + '</b><small>ماه ' + monthKeyLabel(c.month) + ' • <span class="num">شمرده: ' + nf.format(c.counted) + ' / باید: ' + nf.format(c.calculated) + '</span></small></div>' +
             '<div class="lt num" style="color:' + col + '">' + lbl + ' ' + nf.format(Math.abs(c.difference)) + '</div></div>';
         }).join("");
 
     el.innerHTML = head +
-      '<div class="listhead">شمارش ماه ' + monthKey() + ' — تعداد واقعی را بنویسید</div>' +
+      '<div class="listhead">شمارش ماه ' + monthKeyLabel(monthKey()) + ' — تعداد واقعی را بنویسید</div>' +
       rows +
       '<div style="padding:12px 14px 4px"><button class="addline" id="saveCountBtn" style="margin:0">💾 ثبت شمارش ماه</button></div>' +
       '<div class="listhead">فرق‌های ثبت‌شده</div>' +
       recHtml;
+  }
+
+  // یک‌بار: کلید ماهِ شمارش‌های کهنه از میلادی به شمسی تبدیل شود.
+  // اگر این کار نشود، شمارش دوبارهٔ همان ماه، ضایعات کسری کهنه را پیدا
+  // نمی‌کند و ضرر دوبار حساب می‌شود.
+  function migrateMonthKeysToJalali() {
+    var changed = false;
+    function isGregorianKey(k) {
+      var m = /^(\d{4})\/(\d{2})$/.exec(k || "");
+      return !!m && parseInt(m[1], 10) > 1700; // سال میلادی
+    }
+    stockCounts.forEach(function (c) {
+      if (isGregorianKey(c.month) && c.date) {
+        var d = new Date(c.date);
+        if (!isNaN(d)) { c.month = monthKeyOf(d); changed = true; }
+      }
+    });
+    waste.forEach(function (w) {
+      if (isGregorianKey(w.countMonth) && w.date) {
+        var d = new Date(w.date);
+        if (!isNaN(d)) { w.countMonth = monthKeyOf(d); changed = true; }
+      }
+    });
+    if (changed) { save0(LS_COUNTS, stockCounts); save0(LS_WASTE, waste); }
   }
 
   function saveCount() {
@@ -2271,6 +2428,7 @@
   });
 
   // ---------- Init ----------
+  migrateMonthKeysToJalali();
   renderSaleGrid();
   renderCart();
   switchTab("sales");

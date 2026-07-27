@@ -180,6 +180,30 @@
   .tile .badge { font-size: 11px; color: var(--ink-soft); }
   .tile .oos { font-size: 11px; color: var(--danger); font-weight: 700; }
 
+  /* تایل عکس‌دار: عکس تمام تایل را می‌گیرد تا از دور شناخته شود،
+     نام و نرخ روی نوار پایین آن می‌آید. */
+  .tile.photo { padding: 0; overflow: hidden; justify-content: flex-start; gap: 0; min-height: 158px; }
+  .tile.photo .ph {
+    width: 100%; flex: 1 1 auto; min-height: 0; display: block;
+    object-fit: cover; background: var(--card);
+  }
+  .tile.photo .phcap {
+    width: 100%; flex: 0 0 auto; padding: 7px 8px 8px;
+    background: var(--surface); border-top: 1px solid var(--line);
+  }
+  .tile.photo .phcap .nm { font-size: 16px; font-weight: 800; line-height: 1.2; }
+  .tile.photo .oos {
+    position: absolute; top: 6px; inset-inline-start: 6px;
+    background: var(--danger-soft); padding: 2px 8px; border-radius: 999px;
+  }
+  .tile.photo .startag {
+    background: rgba(0,0,0,.45); border-radius: 999px; padding: 1px 5px; font-size: 13px;
+  }
+  .tile.photo .typetag {
+    position: absolute; top: 6px; inset-inline-start: 6px; font-size: 13px;
+    background: rgba(0,0,0,.45); border-radius: 999px; padding: 1px 5px;
+  }
+
   /* Cart bar */
   .cartbar {
     position: sticky; bottom: 0; z-index: 15;
@@ -308,6 +332,16 @@
   .prow .ico { width: 46px; height: 46px; border-radius: 12px; display: grid; place-items: center; font-size: 22px; flex: 0 0 auto; }
   .prow.w .ico { background: var(--primary-soft); color: var(--primary); }
   .prow.u .ico { background: var(--credit-soft); color: var(--credit); }
+  .prow .ico.ph { object-fit: cover; background: var(--card); }
+
+  /* خانهٔ عکس در فورم جنس */
+  .photorow { display: flex; align-items: center; gap: 12px; }
+  .photobox {
+    width: 78px; height: 78px; border-radius: 14px; flex: 0 0 auto; overflow: hidden;
+    border: 1.5px solid var(--line); display: grid; place-items: center; background: var(--card);
+  }
+  .photobox img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .photobox .ico { border-radius: 0; }
   .prow .info { flex: 1 1 auto; min-width: 0; }
   .prow .info b { font-size: 18px; font-weight: 800; display: block; }
   .prow .info small { color: var(--ink-soft); font-size: 13px; }
@@ -896,6 +930,124 @@
     return days + " روز تا خرابی";
   }
   function reasonLabel(r) { return r === "expired" ? "تاریخ‌تیر" : (r === "shortage" ? "کسری شمارش" : "خراب"); }
+  // ---------- انبار عکس‌ها (IndexedDB) ----------
+  // عکس‌ها عمداً جدا از فروش/قرض نگه داشته می‌شوند: جای localStorage
+  // حدود ۵ مگابایت است و اگر عکس‌ها آنجا می‌رفتند، روزی پر می‌شد و
+  // ثبت فروش ناکام می‌گردید. IndexedDB جای بسیار بیشتری دارد.
+  var photoCache = {}; // {productId: dataURL} — برای رسم فوری صفحه
+  var _pdb = null;
+  function photoDB() {
+    return new Promise(function (res, rej) {
+      if (_pdb) return res(_pdb);
+      if (!window.indexedDB) return rej(new Error("no-idb"));
+      var r = indexedDB.open("dukan-photos", 1);
+      r.onupgradeneeded = function () {
+        if (!r.result.objectStoreNames.contains("photos")) r.result.createObjectStore("photos");
+      };
+      r.onsuccess = function () { _pdb = r.result; res(_pdb); };
+      r.onerror = function () { rej(r.error); };
+    });
+  }
+  function photoTx(mode) {
+    return photoDB().then(function (db) { return db.transaction("photos", mode).objectStore("photos"); });
+  }
+  function photoSave(pid, dataUrl) {
+    photoCache[pid] = dataUrl;
+    return photoTx("readwrite").then(function (st) {
+      return new Promise(function (res, rej) {
+        var q = st.put(dataUrl, pid);
+        q.onsuccess = function () { res(); }; q.onerror = function () { rej(q.error); };
+      });
+    });
+  }
+  function photoRemove(pid) {
+    delete photoCache[pid];
+    return photoTx("readwrite").then(function (st) {
+      return new Promise(function (res) { var q = st.delete(pid); q.onsuccess = q.onerror = function () { res(); }; });
+    }).catch(function () {});
+  }
+  function photoLoadAll() {
+    return photoTx("readonly").then(function (st) {
+      return new Promise(function (res) {
+        var out = {};
+        var q = st.openCursor();
+        q.onsuccess = function () {
+          var c = q.result;
+          if (!c) { photoCache = out; return res(out); }
+          out[c.key] = c.value; c.continue();
+        };
+        q.onerror = function () { res({}); };
+      });
+    }).catch(function () { return {}; });
+  }
+  function photoClear() {
+    photoCache = {};
+    return photoTx("readwrite").then(function (st) {
+      return new Promise(function (res) { var q = st.clear(); q.onsuccess = q.onerror = function () { res(); }; });
+    }).catch(function () {});
+  }
+  function photoOf(p) { return p && photoCache[p.id] ? photoCache[p.id] : null; }
+  function photoCount() { return Object.keys(photoCache).length; }
+
+  // عکس گرفته‌شده کوچک می‌شود تا جا کم بگیرد و صفحهٔ فروش تیز بماند
+  function shrinkImage(file, maxSize) {
+    return new Promise(function (res, rej) {
+      var fr = new FileReader();
+      fr.onerror = function () { rej(new Error("read")); };
+      fr.onload = function () {
+        var img = new Image();
+        img.onerror = function () { rej(new Error("decode")); };
+        img.onload = function () {
+          var m = maxSize || 256;
+          // برش مربعی از وسط تا تایل‌ها یک‌شکل باشند
+          var side = Math.min(img.width, img.height);
+          var sx = (img.width - side) / 2, sy = (img.height - side) / 2;
+          var cv = document.createElement("canvas");
+          cv.width = m; cv.height = m;
+          var cx = cv.getContext("2d");
+          cx.drawImage(img, sx, sy, side, side, 0, 0, m, m);
+          res(cv.toDataURL("image/jpeg", 0.72));
+        };
+        img.src = fr.result;
+      };
+      fr.readAsDataURL(file);
+    });
+  }
+
+  // ---------- شناسایی چشمی جنس (برای کسی که خط را خوب نمی‌خواند) ----------
+  // رنگ ثابت از روی نام: همان جنس همیشه همان رنگ را دارد، پس چشم عادت می‌کند.
+  // نام‌های دری حرف‌های مشترک زیاد دارند؛ با هش سادهٔ ۳۱ رنگ‌ها همه سبز
+  // در می‌آمدند. پس FNV با «بهم‌ریختن» نهایی تا رنگ‌ها پخش شوند.
+  function nameHue(name) {
+    var h = 2166136261, s = String(name || "");
+    for (var i = 0; i < s.length; i++) {
+      h = (h ^ s.charCodeAt(i)) >>> 0;
+      h = Math.imul(h, 16777619) >>> 0;
+    }
+    h = (h ^ (h >>> 16)) >>> 0; h = Math.imul(h, 2246822507) >>> 0;
+    h = (h ^ (h >>> 13)) >>> 0; h = Math.imul(h, 3266489909) >>> 0;
+    h = (h ^ (h >>> 16)) >>> 0;
+    return h % 360;
+  }
+  function prodColor(name) { return "hsl(" + nameHue(name) + ",58%,42%)"; }
+  function prodSoft(name) { return "hsl(" + nameHue(name) + ",58%,88%)"; }
+  // حرف اول نام (نشانه‌های اضافی رد می‌شوند)
+  function prodLetter(name) {
+    var s = String(name || "").trim();
+    for (var i = 0; i < s.length; i++) {
+      var c = s.charAt(i);
+      if (c !== " " && c !== "‌" && c !== "«" && c !== '"') return c;
+    }
+    return "؟";
+  }
+  // دایرهٔ رنگی با حرف اول — جای آیکن یکسانِ نوع جنس
+  function prodBadge(p, size) {
+    var sz = size || 42;
+    return '<div class="ico" style="width:' + sz + 'px;height:' + sz + 'px;' +
+      'background:' + prodSoft(p.name) + ';color:' + prodColor(p.name) + ';' +
+      'font-size:' + Math.round(sz * 0.5) + 'px;font-weight:900;line-height:1">' +
+      esc(prodLetter(p.name)) + '</div>';
+  }
   function typeLabel(t) { return t === "weighted" ? "وزنی" : (t === "wifi" ? "وای‌فای" : "دانه‌ای"); }
   function typeIcon(t) { return t === "weighted" ? "⚖️" : (t === "wifi" ? "📶" : "🧃"); }
   function typeCls(t) { return t === "unit" ? "u" : "w"; }
@@ -951,11 +1103,24 @@
     });
     g.innerHTML = list.map(function (p) {
       var cls = typeCls(p.type) + (p.qty <= 0 ? " oosdim" : "");
-      var ico = typeIcon(p.type);
       var oos = p.qty <= 0 ? '<div class="oos">موجود نیست</div>' : '';
+      var ph = photoOf(p);
+      // عکس (اگر باشد) تمام تایل را می‌گیرد تا از دور شناخته شود؛
+      // ورنه دایرهٔ رنگی با حرف اول نام.
+      if (ph) {
+        // در تایل عکسی جای برچسب نوع نیست؛ برای وزنی/وای‌فای یک نشان خورد
+        // می‌آید تا معلوم باشد که زدنش دیالوگ مقدار باز می‌کند.
+        var tp = p.type === "unit" ? "" : '<span class="typetag">' + typeIcon(p.type) + '</span>';
+        return '<div class="tile photo ' + cls + '" data-id="' + p.id + '" role="button" tabindex="0">' +
+          '<img class="ph" src="' + ph + '" alt="" />' +
+          (p.star ? '<span class="startag">⭐</span>' : '') + tp +
+          '<div class="phcap"><div class="nm">' + esc(p.name) + '</div>' +
+          '<div class="pr num">' + money(p.sell) + '</div></div>' +
+          oos + '</div>';
+      }
       return '<div class="tile ' + cls + '" data-id="' + p.id + '" role="button" tabindex="0">' +
         (p.star ? '<span class="startag">⭐</span>' : '') +
-        '<div class="ico">' + ico + '</div>' +
+        prodBadge(p, 52) +
         '<div class="nm">' + esc(p.name) + '</div>' +
         '<div class="pr num">' + money(p.sell) + '</div>' +
         '<div class="badge">' + typeLabel(p.type) + '</div>' +
@@ -1163,7 +1328,9 @@
     });
     el.innerHTML = sorted.map(function (p) {
       var cls = typeCls(p.type);
-      var ico = typeIcon(p.type);
+      // عکس اگر باشد، ورنه دایرهٔ رنگی با حرف اول نام (نه آیکن یکسان نوع)
+      var ph = photoOf(p);
+      var ico = ph ? '<img class="ico ph" src="' + ph + '" alt="" />' : prodBadge(p, 46);
       var low = p.qty <= 0;
       var dte = daysToExpiry(p.expiry);
       var expWarn = (dte !== null && dte <= EXPIRY_WARN_DAYS)
@@ -1171,7 +1338,7 @@
       return '<div class="prow ' + cls + '">' +
         '<button class="star ' + (p.star ? "on" : "") + '" data-star="' + p.id + '" aria-label="پرفروش">⭐</button>' +
         '<div class="tapzone" data-edit="' + p.id + '" role="button" tabindex="0">' +
-          '<div class="ico">' + ico + '</div>' +
+          ico +
           '<div class="info"><b>' + esc(p.name) + '</b><small>' + typeLabel(p.type) + ' • فروش: ' + money(p.sell) + '</small>' +
             (p.buyEstimated ? '<br><span class="estbadge">قیمت خرید تخمینی</span>' : '') +
             (expWarn ? '<br>' + expWarn : '') + '</div>' +
@@ -1308,6 +1475,18 @@
       '<div class="field"><label>نام جنس</label>' +
         '<input id="fName" type="text" value="' + esc(p.name) + '" placeholder="نام جنس" />' +
         '<div class="err" id="eName">نام جنس را بنویسید</div></div>' +
+      // عکس جنس — برای کسی که خط را خوب نمی‌خواند، از روی عکس زودتر می‌شناسد
+      '<div class="field"><label>عکس جنس (اختیاری)</label>' +
+        '<div class="photorow">' +
+          '<div class="photobox" id="fPhotoBox"></div>' +
+          '<div style="flex:1 1 auto;display:flex;flex-direction:column;gap:8px;min-width:0">' +
+            '<button type="button" class="ghost" id="fPhotoBtn" style="width:100%">📷 گرفتن عکس</button>' +
+            '<button type="button" class="ghost" id="fPhotoDel" style="width:100%;color:var(--danger);border-color:var(--danger);display:none">حذف عکس</button>' +
+          '</div>' +
+        '</div>' +
+        '<input type="file" id="fPhotoInp" accept="image/*" capture="environment" style="display:none" />' +
+        '<small style="display:block;margin-top:6px;color:var(--ink-soft);font-size:12.5px">اگر عکس نباشد، دایرهٔ رنگی با حرف اول نام نشان داده می‌شود — هر جنس همیشه همان رنگ را دارد.</small>' +
+      '</div>' +
       '<div class="field"><label>نوع جنس</label>' +
         '<div class="seg" id="segType">' +
           '<button type="button" data-t="weighted" class="' + (p.type === "weighted" ? "on" : "") + '">⚖️ وزنی</button>' +
@@ -1367,6 +1546,31 @@
       $("#lExp").textContent = isWifi ? "تاریخ ختم" : "تاریخ خرابی (اختیاری)";
     }
     refreshLabels();
+
+    // ---------- عکس جنس ----------
+    // عکس در IndexedDB می‌ماند (نه localStorage) تا جای دیتای فروش را نگیرد.
+    var photoData = editing ? photoOf(p) : null;
+    function refreshPhotoBox() {
+      var box = $("#fPhotoBox");
+      if (photoData) box.innerHTML = '<img src="' + photoData + '" alt="" />';
+      else box.innerHTML = prodBadge({ name: $("#fName").value.trim() || p.name }, 78);
+      $("#fPhotoDel").style.display = photoData ? "block" : "none";
+      $("#fPhotoBtn").textContent = photoData ? "📷 عکس دیگر" : "📷 گرفتن عکس";
+    }
+    refreshPhotoBox();
+    // تا وقتی عکس نیست، دایرهٔ رنگی با نامی که تایپ می‌شود زنده تازه گردد
+    $("#fName").addEventListener("input", function () { if (!photoData) refreshPhotoBox(); });
+    $("#fPhotoBtn").addEventListener("click", function () { $("#fPhotoInp").click(); });
+    $("#fPhotoInp").addEventListener("change", function () {
+      var f = this.files && this.files[0];
+      this.value = ""; // تا گرفتن دوبارهٔ همان فایل هم کار کند
+      if (!f) return;
+      shrinkImage(f, 256).then(function (d) {
+        photoData = d; refreshPhotoBox(); buzz();
+      }).catch(function () { toast("عکس خوانده نشد", true); });
+    });
+    $("#fPhotoDel").addEventListener("click", function () { photoData = null; refreshPhotoBox(); });
+
     sheet.querySelectorAll("#segType button").forEach(function (b) {
       b.addEventListener("click", function () {
         type = b.dataset.t;
@@ -1454,6 +1658,7 @@
       if (editing) {
         for (var i = 0; i < products.length; i++) if (products[i].id === p.id) { products[i] = rec; break; }
       } else products.push(rec);
+      if (photoData) photoSave(rec.id, photoData); else photoRemove(rec.id);
       save(LS_P, products);
       closeSheet(); renderProducts(); renderSaleGrid();
       toast(editing ? "تغییرات ذخیره شد ✓" : "جنس ثبت شد ✓");
@@ -1475,6 +1680,7 @@
     $("#delYes").addEventListener("click", function () {
       products = products.filter(function (x) { return x.id !== p.id; });
       cart = cart.filter(function (l) { return l.productId !== p.id; });
+      photoRemove(p.id);
       save(LS_P, products);
       closeSheet(); renderProducts(); renderSaleGrid(); renderCart();
       toast("«" + p.name + "» حذف شد");
@@ -2392,8 +2598,10 @@
         '</div>' +
 
         '<label style="font-size:15px;font-weight:800;color:var(--ink-soft)">بک‌آپ در خود تیلفون</label>' +
-        '<p style="color:var(--ink-soft);font-size:13px;margin:6px 0 8px">یک فایل از تمام دیتا در تیلفون شما ذخیره می‌شود. پیش از هر کار بزرگ این را بگیرید.</p>' +
-        '<button class="addline" id="dlBackup" style="margin:0 0 18px">⬇️ گرفتن فایل بک‌آپ</button>' +
+        '<p style="color:var(--ink-soft);font-size:13px;margin:6px 0 8px">یک فایل از تمام دیتا (با عکس‌ها) در تیلفون شما ذخیره می‌شود. پیش از هر کار بزرگ این را بگیرید.<br>' +
+          '<b>عکس‌ها سنک نمی‌شوند</b> — تنها راه بردنشان به تیلفون دیگر همین فایل است.</p>' +
+        '<button class="addline" id="dlBackup" style="margin:0 0 8px">⬇️ گرفتن فایل بک‌آپ</button>' +
+        '<button class="addline" id="upBackup" style="margin:0 0 18px">⬆️ بازگرداندن از فایل بک‌آپ</button>' +
 
         // ناحیهٔ خطرناک — جدا و با محافظت، تا اشتباهی زده نشود
         '<div style="border:2px solid var(--danger);border-radius:14px;padding:14px;margin-bottom:20px">' +
@@ -2427,6 +2635,7 @@
     var onBtn = document.getElementById("syncOn"); if (onBtn) onBtn.addEventListener("click", function () { persistSettings(); syncStart(); });
     var offBtn = document.getElementById("syncOff"); if (offBtn) offBtn.addEventListener("click", syncStop);
     document.getElementById("dlBackup").addEventListener("click", downloadBackup);
+    document.getElementById("upBackup").addEventListener("click", pickRestoreFile);
     document.getElementById("wipeBtn").addEventListener("click", function () {
       var w = (document.getElementById("wipeWord").value || "").trim();
       if (w !== "پاک") { toast("برای تأیید، کلمهٔ «پاک» را بنویسید", true); return; }
@@ -2439,6 +2648,9 @@
   function downloadBackup() {
     try {
       var data = collectData();
+      // عکس‌ها فقط در بک‌آپ می‌آیند، نه در سنک — تا سنک سنگین و کند نشود.
+      // پس این فایل تنها محافظ عکس‌هاست.
+      data.photos = photoCache;
       data.__backupDate = new Date().toISOString();
       var blob = new Blob([JSON.stringify(data)], { type: "application/json" });
       var url = URL.createObjectURL(blob);
@@ -2452,6 +2664,64 @@
     } catch (e) {
       toast("گرفتن بک‌آپ نشد: " + (e.message || e), true);
     }
+  }
+
+  // ---------- بازگرداندن از فایل بک‌آپ ----------
+  // بدون این، فایل بک‌آپ فقط یک فایل بی‌کار بود. عکس‌ها چون سنک نمی‌شوند،
+  // تنها از همین راه به دستگاه نو می‌روند.
+  function pickRestoreFile() {
+    var inp = document.createElement("input");
+    inp.type = "file"; inp.accept = "application/json,.json";
+    inp.addEventListener("change", function () {
+      var f = inp.files && inp.files[0];
+      if (f) readRestoreFile(f);
+    });
+    inp.click();
+  }
+  function readRestoreFile(file) {
+    var fr = new FileReader();
+    fr.onerror = function () { toast("فایل خوانده نشد", true); };
+    fr.onload = function () {
+      var d = null;
+      try { d = JSON.parse(fr.result); } catch (e) { d = null; }
+      if (!d || typeof d !== "object" || (!d.products && !d.sales)) {
+        toast("این فایل بک‌آپ «دوکان لطیف» نیست", true); return;
+      }
+      confirmRestore(d);
+    };
+    fr.readAsText(file);
+  }
+  function confirmRestore(d) {
+    function n(a) { return Array.isArray(a) ? a.length : 0; }
+    var when = d.__backupDate ? fmtDateLong(String(d.__backupDate).slice(0, 10)) : "نامعلوم";
+    openSheet(
+      '<h2>بازگرداندن بک‌آپ</h2>' +
+      '<p style="font-size:15px;line-height:2;margin:0 0 10px">تاریخ این فایل: <b>' + esc(when) + '</b></p>' +
+      '<div class="iline"><div class="in"><b>اجناس</b></div><div class="lt num">' + nf.format(n(d.products)) + '</div></div>' +
+      '<div class="iline"><div class="in"><b>فروش‌ها</b></div><div class="lt num">' + nf.format(n(d.sales)) + '</div></div>' +
+      '<div class="iline"><div class="in"><b>مشتری‌ها</b></div><div class="lt num">' + nf.format(n(d.customers)) + '</div></div>' +
+      '<div class="iline"><div class="in"><b>فاکتورهای خرید</b></div><div class="lt num">' + nf.format(n(d.purchases)) + '</div></div>' +
+      '<div class="iline"><div class="in"><b>عکس‌ها</b></div><div class="lt num">' +
+        nf.format(d.photos ? Object.keys(d.photos).length : 0) + '</div></div>' +
+      '<p style="font-size:14.5px;line-height:2;margin:12px 0 0;color:var(--danger)">' +
+        '<b>تمام دیتای فعلی این تیلفون با دیتای این فایل عوض می‌شود.</b></p>' +
+      '<div class="actions"><button class="ghost" data-close>نی، لغو</button>' +
+        '<button class="primary" id="restOk">بلی، بازگردان</button></div>'
+    );
+    $("#restOk").addEventListener("click", function () {
+      var ph = (d.photos && typeof d.photos === "object") ? d.photos : {};
+      applyData(d);
+      photoClear().then(function () {
+        var chain = Promise.resolve();
+        Object.keys(ph).forEach(function (k) {
+          chain = chain.then(function () { return photoSave(k, ph[k]); });
+        });
+        return chain;
+      }).then(function () { renderSaleGrid(); renderProducts(); }).catch(function () {});
+      if (typeof syncOnLocalSave === "function") syncOnLocalSave();
+      closeSheet();
+      toast("بک‌آپ بازگردانده شد ✓");
+    });
   }
 
   function confirmWipe() {
@@ -2477,6 +2747,7 @@
     save0(LS_CPAY, custPayments); save0(LS_WASTE, waste); save0(LS_EXP, expenses);
     save0(LS_COUNTS, stockCounts); save0(LS_CASH, cashEntries);
     localStorage.setItem(LS_SEED, "1"); // دیگر نمونهٔ آزمایشی ساخته نشود
+    photoClear(); // عکس‌ها هم با اجناس می‌روند
     invalidateDebts();
     if (typeof syncOnLocalSave === "function") syncOnLocalSave(); // نسخهٔ آنلاین هم خالی شود
     closeSheet();
@@ -3266,6 +3537,11 @@
   renderSaleGrid();
   renderCart();
   switchTab("sales");
+  // عکس‌ها از IndexedDB می‌آیند (ناهم‌زمان) — بعد از رسیدن، صفحه دوباره رسم شود
+  photoLoadAll().then(function () {
+    renderSaleGrid();
+    if (currentTab === "products") renderProducts();
+  }).catch(function () {});
   // اگر سنک قبلاً روشن بوده، خودکار وصل شود
   try { var _sc = syncCfg(); if (_sc.enabled && _sc.url && _sc.key && _sc.shop) syncStart(); } catch (e) {}
 

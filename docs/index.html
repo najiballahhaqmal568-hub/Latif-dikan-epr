@@ -704,6 +704,191 @@
   // پس رقم هرگز نمی‌تواند از واقعیت دور شود، و هر رقم قابل پیگیری است.
   var _debtCache = null;
   function invalidateDebts() { _debtCache = null; }
+  // ---------- باطل‌کردن رکوردهای غلط ----------
+  // هیچ رکورد مالی پاک نمی‌شود. «باطل» یک رکورد وارونه می‌سازد که همه چیز
+  // را پس می‌گیرد، و اصلِ رکورد با نشان «باطل شد» می‌ماند. چون همهٔ رقم‌ها
+  // از جمع رویدادها حساب می‌شوند، رکورد منفی خودکار همه‌جا اثر می‌کند.
+  function isReversal(x) { return !!(x && x.reverseOf); }
+  function isVoided(x) { return !!(x && (x.reversed || x.reverseOf)); }
+
+  // آیا این جنس بعد از این تاریخ خرید/دریافتِ دیگری داشته؟ اگر داشته،
+  // قیمت خرید اوسط دیگر به عقب برنمی‌گردد و باید خود دوکان‌دار ببیندش.
+  function hasLaterBuyEvent(productId, afterDate) {
+    var later = false;
+    purchases.forEach(function (pu) {
+      if (isReversal(pu) || (pu.date || "") <= (afterDate || "")) return;
+      (pu.items || []).forEach(function (it) { if (it.productId === productId) later = true; });
+    });
+    custPayments.forEach(function (p) {
+      if (!isGoodsPay(p) || isReversal(p) || (p.date || "") <= (afterDate || "")) return;
+      if (p.productId === productId) later = true;
+    });
+    return later;
+  }
+
+  // قیمت خرید را به عکسِ پیش از این رویداد برمی‌گرداند — اگر امن باشد.
+  // نام جنس‌هایی که امن نبود برگردانده می‌شود تا به کاربر گفته شود.
+  function restoreBuyPrice(productId, prevBuy, prevEst, date, warnOut) {
+    var p = findP(productId);
+    if (!p) return;
+    if (prevBuy === undefined || prevBuy === null) { warnOut.push(p.name); return; }
+    if (hasLaterBuyEvent(productId, date)) { warnOut.push(p.name); return; }
+    p.buy = prevBuy;
+    p.buyEstimated = !!prevEst;
+  }
+
+  function voidWarnSheet(names, then) {
+    if (!names.length) { then(); return; }
+    then();
+    setTimeout(function () {
+      openSheet(
+        '<h2 style="color:var(--credit)">قیمت خرید را خودتان ببینید</h2>' +
+        '<p style="font-size:14.5px;line-height:2;margin:-4px 0 14px">' +
+          'باطل شد و موجودی، قرض و صندوق پس آمدند. ولی <b>قیمت خرید</b> این جنس‌ها ' +
+          'به عقب برنگشت، چون بعد از آن خرید دیگری هم شده:<br>' +
+          '<b>' + names.map(esc).join("، ") + '</b><br><br>' +
+          'از «اجناس» یا «بازبینی نرخ‌ها» قیمت خریدشان را ببینید و اگر غلط بود درست کنید.</p>' +
+        '<div class="actions"><button class="primary" data-close>فهمیدم</button></div>'
+      );
+    }, 300);
+  }
+
+  // پرسیدن پیش از باطل‌کردن — با نوشتن دقیق اینکه چه چیزی پس می‌آید
+  function confirmVoid(title, lines, run) {
+    openSheet(
+      '<h2 style="color:var(--danger)">' + esc(title) + '</h2>' +
+      '<p style="font-size:14.5px;line-height:2;margin:-4px 0 12px">این چیزها پس می‌آیند:</p>' +
+      '<div class="sumbox" style="margin-bottom:12px">' +
+        lines.map(function (l) {
+          return '<div class="sumrow"><span>' + l[0] + '</span><span class="num">' + l[1] + '</span></div>';
+        }).join("") +
+      '</div>' +
+      '<p style="font-size:13px;color:var(--ink-soft);line-height:1.9;margin:0 0 12px">' +
+        'رکورد پاک نمی‌شود — با نشان «باطل شد» می‌ماند و یک رکورد وارونه ثبت می‌گردد. ' +
+        'بعد رقم درست را از نو ثبت کنید.</p>' +
+      '<div class="actions"><button class="ghost" data-close>نی، لغو</button>' +
+        '<button class="primary" id="voidOk" style="background:var(--danger)">بلی، باطل کن</button></div>'
+    );
+    $("#voidOk").addEventListener("click", run);
+  }
+
+  // ---- ۱) فاکتور خرید ----
+  function voidPurchase(pu) {
+    if (isVoided(pu)) return;
+    confirmVoid("باطل‌کردن فاکتور خرید", [
+      ["موجودی اجناس", "کم می‌شود"],
+      ["پرداخت‌شده (به صندوق)", "＋ " + money(pu.paid || 0)],
+      ["باقی‌ماندهٔ قرض تامین‌کننده", "− " + money(pu.remaining || 0)]
+    ], function () {
+      var warn = [];
+      (pu.items || []).forEach(function (it) {
+        var p = findP(it.productId);
+        if (p) p.qty = +(p.qty - it.qty).toFixed(3);
+        restoreBuyPrice(it.productId, it.prevBuy, it.prevEst, pu.date, warn);
+      });
+      pu.reversed = true;
+      purchases.push({ id: id(), supplierId: pu.supplierId, supplierName: pu.supplierName,
+        date: new Date().toISOString(), total: -pu.total, paid: -(pu.paid || 0),
+        remaining: -(pu.remaining || 0), reverseOf: pu.id,
+        items: (pu.items || []).map(function (it) {
+          return { productId: it.productId, productName: it.productName, qty: -it.qty, buyPrice: it.buyPrice };
+        }) });
+      save(LS_PUR, purchases); save(LS_P, products);
+      closeSheet();
+      renderPurchases(); renderSuppliers(); renderProducts(); renderSaleGrid();
+      toast("فاکتور باطل شد ✓");
+      voidWarnSheet(warn, function () {});
+    });
+  }
+
+  // ---- ۲) رسید پرداخت به تامین‌کننده ----
+  function voidSupPayment(rec) {
+    if (isVoided(rec)) return;
+    var s = findS(rec.supplierId);
+    confirmVoid("باطل‌کردن رسید پرداخت", [
+      ["پول به صندوق", "＋ " + money(rec.amount)],
+      ["قرض " + (s ? s.name : "تامین‌کننده"), "＋ " + money(rec.amount)]
+    ], function () {
+      rec.reversed = true;
+      supPayments.push({ id: id(), supplierId: rec.supplierId, date: new Date().toISOString(),
+        amount: -rec.amount, reverseOf: rec.id });
+      save(LS_SPAY, supPayments);
+      closeSheet(); renderSuppliers();
+      if (s) openSupplierDetail(s);
+      toast("رسید باطل شد ✓");
+    });
+  }
+
+  // ---- ۳) رسید دریافت از مشتری (نقدی یا به جنس) ----
+  function voidCustPayment(rec) {
+    if (isVoided(rec)) return;
+    var c = findC(rec.customerId);
+    var goods = isGoodsPay(rec);
+    confirmVoid("باطل‌کردن رسید دریافت", goods
+      ? [["موجودی " + (rec.productName || "جنس"), "− " + nf.format(rec.qty)],
+         ["قرض " + (c ? c.name : "مشتری"), "＋ " + money(rec.amount)],
+         ["صندوق", "دست‌نخورده"]]
+      : [["پول از صندوق", "− " + money(rec.amount)],
+         ["قرض " + (c ? c.name : "مشتری"), "＋ " + money(rec.amount)]],
+    function () {
+      var warn = [];
+      if (goods) {
+        var p = findP(rec.productId);
+        if (p) p.qty = +(p.qty - rec.qty).toFixed(3);
+        restoreBuyPrice(rec.productId, rec.prevBuy, rec.prevEst, rec.date, warn);
+        save(LS_P, products);
+      }
+      rec.reversed = true;
+      var rev = { id: id(), customerId: rec.customerId, date: new Date().toISOString(),
+        amount: -rec.amount, reverseOf: rec.id };
+      if (goods) {
+        rev.kind = "goods"; rev.productId = rec.productId; rev.productName = rec.productName;
+        rev.unit = rec.unit; rev.qty = -rec.qty; rev.unitPrice = rec.unitPrice;
+      }
+      custPayments.push(rev);
+      save(LS_CPAY, custPayments);
+      closeSheet(); renderCustomers(); renderProducts(); renderSaleGrid();
+      if (c) openCustomerDetail(c);
+      toast("رسید باطل شد ✓");
+      voidWarnSheet(warn, function () {});
+    });
+  }
+
+  // ---- ۴) پول داخل / پول خارج صندوق ----
+  function voidCashEntry(rec) {
+    if (isVoided(rec)) return;
+    var isIn = rec.kind === "in";
+    confirmVoid("باطل‌کردن " + (isIn ? "«پول داخل»" : "«پول خارج»"),
+      [["صندوق", (isIn ? "− " : "＋ ") + money(rec.amount)]],
+      function () {
+        rec.reversed = true;
+        cashEntries.push({ id: id(), date: new Date().toISOString(), kind: rec.kind,
+          amount: -rec.amount, note: "باطل‌کردن: " + (rec.note || ""), reverseOf: rec.id });
+        save(LS_CASH, cashEntries);
+        closeSheet(); renderMore();
+        toast("باطل شد ✓");
+      });
+  }
+
+  // ---- ۵) ضایعات ----
+  function voidWaste(rec) {
+    if (isVoided(rec)) return;
+    confirmVoid("باطل‌کردن ضایعات", [
+      ["موجودی " + (rec.productName || "جنس"), "＋ " + nf.format(rec.quantity)],
+      ["ضرر ضایعات", "− " + money(rec.quantity * rec.buyPrice)]
+    ], function () {
+      var p = findP(rec.productId);
+      if (p) p.qty = +(p.qty + rec.quantity).toFixed(3);
+      rec.reversed = true;
+      waste.push({ id: id(), date: new Date().toISOString(), productId: rec.productId,
+        productName: rec.productName, unit: rec.unit, quantity: -rec.quantity,
+        buyPrice: rec.buyPrice, reason: rec.reason, reverseOf: rec.id });
+      save(LS_WASTE, waste); save(LS_P, products);
+      closeSheet(); renderMore(); renderProducts(); renderSaleGrid();
+      toast("ضایعات باطل شد ✓");
+    });
+  }
+
   // «دریافت به جنس»: مشتری به‌جای پول، جنس می‌دهد (تخم مرغ به ۵، آرد کیلو ۱۰).
   // این رسید قرض او را کم می‌کند و موجودی دوکان را زیاد، ولی **صندوق را
   // دست نمی‌زند** — چون پولی نگرفته‌ایم. هرجا صندوق حساب می‌شود باید
@@ -1798,8 +1983,10 @@
     var sorted = purchases.slice().sort(function (a, b) { return (b.date || "").localeCompare(a.date || ""); });
     el.innerHTML = sorted.map(function (pu) {
       var rem = pu.remaining > 0 ? '<span class="rem num">باقی: ' + money(pu.remaining) + '</span>' : '<span class="paidz">تصفیه شد</span>';
+      var tag = pu.reverseOf ? ' <span class="retbadge">باطل‌کردن</span>'
+              : (pu.reversed ? ' <span class="retbadge">باطل شد</span>' : '');
       return '<div class="pcard" data-purchase="' + pu.id + '">' +
-        '<div class="r1"><b>' + esc(pu.supplierName || "بدون نام") + '</b><span class="dt num">' + fmtDate(pu.date) + '</span></div>' +
+        '<div class="r1"><b>' + esc(pu.supplierName || "بدون نام") + tag + '</b><span class="dt num">' + fmtDate(pu.date) + '</span></div>' +
         '<div class="r2"><span class="num">مجموع: ' + money(pu.total) + '</span>' + rem + '</div></div>';
     }).join("");
   }
@@ -1818,8 +2005,14 @@
         '<div class="sumrow"><span>پرداخت‌شده</span><span class="paid num">' + money(pu.paid) + '</span></div>' +
         '<div class="sumrow total"><span>باقی‌مانده (قرض)</span><span class="rem num">' + money(pu.remaining) + '</span></div>' +
       '</div>' +
+      (isVoided(pu)
+        ? '<p style="text-align:center;color:var(--ink-soft);font-size:14px;margin:10px 0 0">' +
+            (pu.reverseOf ? 'این خودش رکورد باطل‌کردن است' : '<b class="retbadge">باطل شد</b>') + '</p>'
+        : '<button class="addline" id="puVoid" style="border-style:solid;color:var(--danger);border-color:var(--danger)">✖ باطل‌کردن این فاکتور (غلط ثبت شده)</button>') +
       '<div class="actions"><button class="primary" data-close>بستن</button></div>'
     );
+    var vb = document.getElementById("puVoid");
+    if (vb) vb.addEventListener("click", function () { voidPurchase(pu); });
   }
 
   // Invoice builder (draft in memory)
@@ -2131,6 +2324,9 @@
       var oldQty = p.qty > 0 ? p.qty : 0;
       var oldBuy = p.buy || 0;
       var wasEstimated = !!p.buyEstimated;
+      // عکس قیمت خرید پیش از این فاکتور — تا اگر باطل شد بشود پسش گرداند
+      l.prevBuy = isBrandNew ? undefined : oldBuy;
+      l.prevEst = wasEstimated;
       // اگر قیمت کهنه تخمینی بود، دیگر با آن اوسط گرفته نمی‌شود —
       // قیمت واقعی این خرید جای آن را می‌گیرد و نشان «تخمینی» برداشته می‌شود.
       if (p.buyEstimated) {
@@ -2150,7 +2346,10 @@
     purchases.push({
       id: id(), supplierId: sup.id, supplierName: sup.name, date: draft.date || todayISO(),
       total: total, paid: paid, remaining: remaining,
-      items: validLines.map(function (l) { return { productId: l.productId, productName: l.name, qty: l.qty, buyPrice: l.buyPrice }; })
+      items: validLines.map(function (l) {
+        return { productId: l.productId, productName: l.name, qty: l.qty, buyPrice: l.buyPrice,
+                 prevBuy: l.prevBuy, prevEst: l.prevEst };
+      })
     });
 
     save(LS_PUR, purchases); save(LS_SUP, suppliers); save(LS_P, products);
@@ -2224,7 +2423,13 @@
             nf.format(r.qty) + ' ' + unitLabel(r.unit) + ' ' + esc(r.productName) +
             ' × ' + money(r.unitPrice) + '</span>'
         : 'رسید نقدی';
-      return '<div class="iline"><div class="in"><b class="num">' + fmtDate(r.date) + '</b><small>' + sub + '</small></div>' +
+      var tag = r.reverseOf ? ' <span class="retbadge">باطل‌کردن</span>'
+              : (r.reversed ? ' <span class="retbadge">باطل شد</span>' : '');
+      // دکمهٔ باطل فقط روی رسید سالم — تا باطلِ باطل نشود
+      var btn = isVoided(r) ? '' :
+        '<button class="wbtn" data-void' + (key === "customerId" ? "cp" : "sp") + '="' + r.id + '" style="background:var(--danger)">باطل</button>';
+      return '<div class="iline">' + btn +
+        '<div class="in"><b class="num">' + fmtDate(r.date) + tag + '</b><small>' + sub + '</small></div>' +
         '<div class="lt num" style="color:var(--primary)">' + money(r.amount) + '</div></div>';
     }).join("");
   }
@@ -2635,13 +2840,16 @@
       // قیمت خرید مثل فاکتور خرید اوسط وزنی می‌شود — نرخ این معامله هم
       // یک «خرید» واقعی است، فقط پولش جنس بوده نه نقد.
       var oldQty = p.qty > 0 ? p.qty : 0, oldBuy = p.buy || 0;
+      var wasEst = !!p.buyEstimated;
       if (p.buyEstimated) { p.buy = v.price; p.buyEstimated = false; }
       else p.buy = oldQty > 0 ? +(((oldQty * oldBuy) + (v.qty * v.price)) / (oldQty + v.qty)).toFixed(2) : v.price;
       p.qty = +(p.qty + v.qty).toFixed(3);
 
       custPayments.push({ id: id(), customerId: c.id, date: new Date().toISOString(),
         amount: v.value, kind: "goods", productId: p.id, productName: p.name,
-        unit: p.unit, qty: v.qty, unitPrice: v.price });
+        unit: p.unit, qty: v.qty, unitPrice: v.price,
+        // عکس قیمت خرید پیش از این رسید — برای باطل‌کردن
+        prevBuy: picked.isNew ? undefined : oldBuy, prevEst: wasEst });
 
       save(LS_CUST, customers); save(LS_CPAY, custPayments); save(LS_P, products);
       renderCustomers(); renderProducts(); renderSaleGrid();
@@ -3345,8 +3553,8 @@
     });
     cashEntries.forEach(function (e) {
       if (e.kind === "opening") out.push({ date: e.date, amount: e.amount, label: "موجودی اول صندوق", opening: true });
-      else if (e.kind === "in") out.push({ date: e.date, amount: e.amount, label: "پول داخل شد" + (e.note ? " — " + e.note : "") });
-      else if (e.kind === "out") out.push({ date: e.date, amount: -e.amount, label: "پول خارج شد" + (e.note ? " — " + e.note : "") });
+      else if (e.kind === "in") out.push({ date: e.date, amount: e.amount, entry: e, label: "پول داخل شد" + (e.note ? " — " + e.note : "") });
+      else if (e.kind === "out") out.push({ date: e.date, amount: -e.amount, entry: e, label: "پول خارج شد" + (e.note ? " — " + e.note : "") });
       else if (e.kind === "count") out.push({ date: e.date, amount: e.amount,
         label: (e.amount < 0 ? "کسری شمارش صندوق" : "زیادت شمارش صندوق") });
     });
@@ -3394,7 +3602,13 @@
       : moves.slice(0, 60).map(function (m) {
           var col = m.amount < 0 ? "var(--danger)" : "var(--primary)";
           var sign = m.amount < 0 ? "−" : "＋";
-          return '<div class="iline"><div class="in"><b>' + esc(m.label) + '</b>' +
+          // فقط پول دستی باطل می‌شود؛ بقیه از جای خودشان (فاکتور، رسید) باطل می‌گردند
+          var e = m.entry;
+          var tag = (e && e.reverseOf) ? ' <span class="retbadge">باطل‌کردن</span>'
+                  : ((e && e.reversed) ? ' <span class="retbadge">باطل شد</span>' : '');
+          var btn = (e && !isVoided(e)) ?
+            '<button class="wbtn" data-voidce="' + e.id + '" style="background:var(--danger)">باطل</button>' : '';
+          return '<div class="iline">' + btn + '<div class="in"><b>' + esc(m.label) + tag + '</b>' +
             '<small class="num">' + fmtDate(m.date) + ' • مانده: ' + money(m.balance) + '</small></div>' +
             '<div class="lt num" style="color:' + col + '">' + sign + ' ' + money(Math.abs(m.amount)) + '</div></div>';
         }).join("");
@@ -3881,7 +4095,11 @@
     var listHtml = sorted.length === 0
       ? '<p style="color:var(--ink-soft);text-align:center;padding:10px;font-size:14px">هنوز ضایعاتی ثبت نشده</p>'
       : sorted.map(function (w) {
-          return '<div class="iline"><div class="in"><b>' + esc(w.productName) + '</b>' +
+          var tag = w.reverseOf ? ' <span class="retbadge">باطل‌کردن</span>'
+                  : (w.reversed ? ' <span class="retbadge">باطل شد</span>' : '');
+          var btn = isVoided(w) ? '' :
+            '<button class="wbtn" data-voidw="' + w.id + '" style="background:var(--danger)">باطل</button>';
+          return '<div class="iline">' + btn + '<div class="in"><b>' + esc(w.productName) + tag + '</b>' +
             '<small class="num">' + fmtDate(w.date) + ' • <span class="reason-badge">' + reasonLabel(w.reason) + '</span> • ' + qtyUnit(w.quantity, w.unit) + '</small></div>' +
             '<div class="lt num" style="color:var(--danger)">' + money(w.quantity * w.buyPrice) + '</div></div>';
         }).join("");
@@ -4075,6 +4293,23 @@
   $("#searchClr").addEventListener("click", function () { $("#search").value = ""; this.style.display = "none"; renderSaleGrid(); $("#search").focus(); });
 
   document.addEventListener("click", function (e) { if (e.target.closest("[data-close]")) closeSheet(); });
+
+  // دکمه‌های «باطل» — چون بعضی‌شان داخل شیت‌اند و بعضی در صفحهٔ «بیشتر»،
+  // یک شنوندهٔ عمومی برای همه.
+  document.addEventListener("click", function (e) {
+    if (READONLY) return;
+    function pick(list, attr) {
+      var b = e.target.closest("[" + attr + "]"); if (!b) return null;
+      var wanted = b.getAttribute(attr);
+      for (var i = 0; i < list.length; i++) if (list[i].id === wanted) return list[i];
+      return null;
+    }
+    var r;
+    if ((r = pick(custPayments, "data-voidcp"))) { voidCustPayment(r); return; }
+    if ((r = pick(supPayments, "data-voidsp"))) { voidSupPayment(r); return; }
+    if ((r = pick(cashEntries, "data-voidce"))) { voidCashEntry(r); return; }
+    if ((r = pick(waste, "data-voidw"))) { voidWaste(r); return; }
+  });
   document.addEventListener("keydown", function (e) { if (e.key === "Escape" && overlay.classList.contains("open")) closeSheet(); });
 
   // Tabs

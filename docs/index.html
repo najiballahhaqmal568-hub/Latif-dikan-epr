@@ -704,6 +704,12 @@
   // پس رقم هرگز نمی‌تواند از واقعیت دور شود، و هر رقم قابل پیگیری است.
   var _debtCache = null;
   function invalidateDebts() { _debtCache = null; }
+  // «دریافت به جنس»: مشتری به‌جای پول، جنس می‌دهد (تخم مرغ به ۵، آرد کیلو ۱۰).
+  // این رسید قرض او را کم می‌کند و موجودی دوکان را زیاد، ولی **صندوق را
+  // دست نمی‌زند** — چون پولی نگرفته‌ایم. هرجا صندوق حساب می‌شود باید
+  // جدا شود، ورنه پول ساختگی در صندوق نشان داده می‌شد.
+  function isGoodsPay(p) { return !!p && p.kind === "goods"; }
+
   function debtMaps() {
     if (_debtCache) return _debtCache;
     var c = {}, s = {};
@@ -737,8 +743,15 @@
     sales.forEach(function (x) {
       if (x.paymentType === "credit" && x.customerId === c.id) sale += x.total;
     });
-    custPayments.forEach(function (p) { if (p.customerId === c.id) paid += p.amount; });
-    return { opening: c.opening || 0, sales: +sale.toFixed(2), paid: +paid.toFixed(2) };
+    var goods = 0;
+    custPayments.forEach(function (p) {
+      if (p.customerId !== c.id) return;
+      paid += p.amount;
+      if (isGoodsPay(p)) goods += p.amount; // فقط برای نشان‌دادن، جدا شمرده می‌شود
+    });
+    // paid همیشه مجموع است (نقد + به جنس)، تا opening + sales − paid همان قرض بماند
+    return { opening: c.opening || 0, sales: +sale.toFixed(2), paid: +paid.toFixed(2),
+             paidGoods: +goods.toFixed(2), paidCash: +(paid - goods).toFixed(2) };
   }
   function supBreakdown(s) {
     var buy = 0, paid = 0;
@@ -766,7 +779,7 @@
               purchasePaid: 0, supPaid: 0, expenses: 0,
               manualIn: 0, manualOut: 0, adjust: 0 };
     sales.forEach(function (s) { if (s.paymentType === "cash") b.sales += s.total; });
-    custPayments.forEach(function (p) { b.custPaid += p.amount; });
+    custPayments.forEach(function (p) { if (!isGoodsPay(p)) b.custPaid += p.amount; });
     purchases.forEach(function (p) { b.purchasePaid += (p.paid || 0); });
     supPayments.forEach(function (p) { b.supPaid += p.amount; });
     expenses.forEach(function (e) { b.expenses += e.amount; });
@@ -2199,7 +2212,14 @@
       .sort(function (a, b) { return (b.date || "").localeCompare(a.date || ""); });
     if (mine.length === 0) return '<p style="color:var(--ink-soft);text-align:center;padding:8px">رسیدی ثبت نشده</p>';
     return mine.map(function (r) {
-      return '<div class="iline"><div class="in"><b class="num">' + fmtDate(r.date) + '</b><small>رسید</small></div><div class="lt num" style="color:var(--primary)">' + money(r.amount) + '</div></div>';
+      // رسید «به جنس» باید در نگاه اول از رسید نقدی فرق کند
+      var sub = isGoodsPay(r)
+        ? '<span class="estbadge">به جنس</span> <span class="num">' +
+            nf.format(r.qty) + ' ' + unitLabel(r.unit) + ' ' + esc(r.productName) +
+            ' × ' + money(r.unitPrice) + '</span>'
+        : 'رسید نقدی';
+      return '<div class="iline"><div class="in"><b class="num">' + fmtDate(r.date) + '</b><small>' + sub + '</small></div>' +
+        '<div class="lt num" style="color:var(--primary)">' + money(r.amount) + '</div></div>';
     }).join("");
   }
 
@@ -2315,10 +2335,14 @@
       '<div class="sumbox">' +
         '<div class="sumrow"><span>قرض قبلی</span><span class="num">' + money(cb.opening) + '</span></div>' +
         '<div class="sumrow"><span>فروش‌های قرضی</span><span class="num">＋ ' + money(cb.sales) + '</span></div>' +
-        '<div class="sumrow"><span>دریافت‌های ما</span><span class="num">− ' + money(cb.paid) + '</span></div>' +
+        (cb.paidGoods
+          ? '<div class="sumrow"><span>دریافت نقدی</span><span class="num">− ' + money(cb.paidCash) + '</span></div>' +
+            '<div class="sumrow"><span>دریافت به جنس</span><span class="num">− ' + money(cb.paidGoods) + '</span></div>'
+          : '<div class="sumrow"><span>دریافت‌های ما</span><span class="num">− ' + money(cb.paid) + '</span></div>') +
         '<div class="sumrow total"><span>' + (cd < 0 ? "پیش‌پرداخت او نزد ما" : "مجموع قرض او به ما") + '</span><span class="rem num">' + money(Math.abs(cd)) + '</span></div>' +
       '</div>' +
       '<button class="addline" id="cPayBtn" style="border-style:solid;background:var(--primary);color:var(--primary-ink);border-color:var(--primary)">💵 دریافت پرداخت از مشتری</button>' +
+      '<button class="addline" id="cGoodsBtn" style="border-style:solid;background:var(--credit);color:#fff;border-color:var(--credit)">🌾 دریافت به جنس (پول ندارد)</button>' +
       '<label style="font-size:15px;font-weight:800;color:var(--ink-soft)">رسیدهای دریافت</label>' +
       '<div style="margin-top:6px">' + payReceiptRows(custPayments, "customerId", c.id) + '</div>' +
       '<label style="font-size:15px;font-weight:800;color:var(--ink-soft)">فروش‌های قرضی</label>' +
@@ -2326,6 +2350,164 @@
       '<div class="actions"><button class="primary" data-close>بستن</button></div>'
     );
     $("#cPayBtn").addEventListener("click", function () { openCustomerPay(c); });
+    $("#cGoodsBtn").addEventListener("click", function () { openCustomerGoods(c); });
+  }
+
+  // ---------- دریافت به جنس ----------
+  // مشتری پول ندارد و به‌جایش جنس می‌دهد (تخم مرغ به ۵، آرد کیلو ۱۰).
+  // یک رویداد با سه اثر که باید یکجا ثبت شوند، ورنه یکی از سه رقم غلط می‌ماند:
+  //   ۱) قرض مشتری به اندازهٔ ارزش جنس کم می‌شود،
+  //   ۲) موجودی همان جنس در دوکان زیاد می‌شود،
+  //   ۳) صندوق دست‌نخورده می‌ماند (پولی نگرفته‌ایم).
+  // بعد همین جنس در بازار فروخته می‌شود و فایده‌اش (فروش − همین نرخ)
+  // خودکار در گزارش‌ها می‌آید.
+  function openCustomerGoods(c) {
+    var picked = null;      // {id, name, unit, isNew, type, sell}
+    var debtNow = custDebt(c);
+
+    function draw() {
+      openSheet(
+        '<h2>🌾 دریافت به جنس از ' + esc(c.name) + '</h2>' +
+        '<p style="margin:-6px 0 12px;color:var(--ink-soft);font-size:13.5px;line-height:1.9">' +
+          'قرض فعلی: <b class="num">' + money(debtNow) + '</b><br>' +
+          'جنسی که به‌جای پول می‌دهد و نرخی که با هم قبول کردید. ' +
+          '<b>صندوق دست نمی‌خورد</b> — پول نگرفته‌اید.</p>' +
+        '<div class="field"><label>جنس</label>' +
+          '<button type="button" class="addline" id="gPick" style="margin:0;text-align:center">' +
+            (picked ? esc(picked.name) + ' — تبدیل' : '＋ انتخاب جنس') + '</button>' +
+          '<div class="err" id="eGProd">جنس را انتخاب کنید</div></div>' +
+        (picked ?
+        '<div class="field"><label>مقدار (' + unitLabel(picked.unit) + ')</label>' +
+          '<input id="gQty" type="number" inputmode="decimal" step="any" min="0" placeholder="0" /></div>' +
+        '<div class="field"><label>نرخ فی ' + unitLabel(picked.unit) + ' (افغانی)</label>' +
+          '<input id="gPrice" type="number" inputmode="decimal" step="any" min="0" placeholder="0" /></div>' +
+        '<div class="sumbox" id="gOut" style="margin-bottom:12px"></div>' : '') +
+        '<div class="actions"><button class="ghost" data-close>لغو</button>' +
+          '<button class="primary" id="gOk">ثبت</button></div>'
+      );
+      $("#gPick").addEventListener("click", openGoodsPicker);
+      if (picked) {
+        $("#gQty").addEventListener("input", refresh);
+        $("#gPrice").addEventListener("input", refresh);
+        refresh();
+        setTimeout(function () { $("#gQty").focus(); }, 60);
+      }
+      $("#gOk").addEventListener("click", commit);
+    }
+
+    function valueNow() {
+      if (!picked) return null;
+      var q = parseFloat($("#gQty").value), pr = parseFloat($("#gPrice").value);
+      if (!(q > 0) || !(pr > 0)) return null;
+      return { qty: q, price: pr, value: +(q * pr).toFixed(2) };
+    }
+    function refresh() {
+      var v = valueNow(), out = $("#gOut");
+      if (!v) { out.innerHTML = '<div class="sumrow"><span>ارزش جنس</span><span class="num">—</span></div>'; return; }
+      var after = +(debtNow - v.value).toFixed(2);
+      var lbl = after === 0 ? "قرضش تصفیه می‌شود" : (after < 0 ? "پیش‌پرداخت او می‌شود" : "قرضش می‌ماند");
+      var col = after > 0 ? "var(--danger)" : "var(--primary)";
+      out.innerHTML =
+        '<div class="sumrow"><span>ارزش جنس</span><span class="num">' + money(v.value) + '</span></div>' +
+        '<div class="sumrow total"><span>' + lbl + '</span>' +
+          '<span class="num" style="color:' + col + '">' + (after === 0 ? "✓" : money(Math.abs(after))) + '</span></div>';
+    }
+
+    // انتخاب جنس موجود، یا ساختن جنس نو (تخم مرغ شاید در اجناس نباشد)
+    function openGoodsPicker() {
+      var list = products.slice().sort(function (a, b) { return a.name.localeCompare(b.name, "fa"); });
+      openSheet(
+        '<h2>کدام جنس؟</h2>' +
+        '<button class="addline" id="gNew">＋ جنس نو (که در اجناس نیست)</button>' +
+        (list.length === 0 ? '<p style="color:var(--ink-soft);text-align:center;padding:8px">هنوز جنسی نیست</p>' :
+          list.map(function (p) {
+            return '<div class="iline" data-gp="' + p.id + '" role="button" tabindex="0" style="cursor:pointer">' +
+              '<div class="in"><b>' + esc(p.name) + '</b><small class="num">موجود: ' + qtyUnit(p.qty, p.unit) + '</small></div>' +
+              '<div class="lt num">' + money(p.sell) + '</div></div>';
+          }).join("")) +
+        '<div class="actions"><button class="ghost" id="gBack">بازگشت</button></div>'
+      );
+      $("#gBack").addEventListener("click", draw);
+      $("#gNew").addEventListener("click", openGoodsNew);
+      sheet.querySelectorAll("[data-gp]").forEach(function (el) {
+        el.addEventListener("click", function () {
+          var p = findP(el.dataset.gp);
+          picked = { id: p.id, name: p.name, unit: p.unit, isNew: false };
+          draw();
+        });
+      });
+    }
+    function openGoodsNew() {
+      var type = "unit", unit = "piece";
+      openSheet(
+        '<h2>جنس نو</h2>' +
+        '<div class="field"><label>نام جنس</label>' +
+          '<input id="gnName" type="text" placeholder="مثلاً: تخم مرغ" />' +
+          '<div class="err" id="eGnName">نام جنس را بنویسید</div></div>' +
+        '<div class="field"><label>نوع جنس</label>' +
+          '<div class="seg" id="gnType">' +
+            '<button type="button" data-t="weighted">⚖️ وزنی</button>' +
+            '<button type="button" data-t="unit" class="on">🧃 دانه‌ای</button>' +
+          '</div></div>' +
+        '<div class="field"><label>قیمت فروش (افغانی)</label>' +
+          '<input id="gnSell" type="number" inputmode="decimal" step="any" min="0" placeholder="0" />' +
+          '<small style="display:block;margin-top:6px;color:var(--ink-soft);font-size:12.5px">نرخی که در بازار می‌فروشید. نرخ گرفتنش را در قدم بعد می‌نویسید.</small></div>' +
+        '<div class="actions"><button class="ghost" id="gnBack">بازگشت</button>' +
+          '<button class="primary" id="gnOk">ادامه</button></div>'
+      );
+      sheet.querySelectorAll("#gnType button").forEach(function (b) {
+        b.addEventListener("click", function () {
+          type = b.dataset.t; unit = type === "weighted" ? "kg" : "piece";
+          sheet.querySelectorAll("#gnType button").forEach(function (x) { x.classList.toggle("on", x === b); });
+        });
+      });
+      $("#gnBack").addEventListener("click", openGoodsPicker);
+      $("#gnOk").addEventListener("click", function () {
+        var nm = $("#gnName").value.trim();
+        $("#eGnName").classList.toggle("show", !nm);
+        if (!nm) return;
+        picked = { id: id(), name: nm, unit: unit, type: type,
+                   sell: parseFloat($("#gnSell").value) || 0, isNew: true };
+        draw();
+      });
+      setTimeout(function () { $("#gnName").focus(); }, 60);
+    }
+
+    function commit() {
+      if (!picked) { $("#eGProd").classList.add("show"); return; }
+      var v = valueNow();
+      if (!v) { toast("مقدار و نرخ را درست بنویسید", true); return; }
+
+      // جنس نو اول در اجناس ثبت شود (تعداد ۰، پایین زیاد می‌شود)
+      if (picked.isNew && !findP(picked.id)) {
+        products.push({ id: picked.id, name: picked.name, type: picked.type || "unit",
+          unit: picked.unit, buy: v.price, sell: picked.sell || 0, qty: 0, expiry: "" });
+      }
+      var p = findP(picked.id);
+      if (!p) { toast("جنس پیدا نشد", true); return; }
+
+      // قیمت خرید مثل فاکتور خرید اوسط وزنی می‌شود — نرخ این معامله هم
+      // یک «خرید» واقعی است، فقط پولش جنس بوده نه نقد.
+      var oldQty = p.qty > 0 ? p.qty : 0, oldBuy = p.buy || 0;
+      if (p.buyEstimated) { p.buy = v.price; p.buyEstimated = false; }
+      else p.buy = oldQty > 0 ? +(((oldQty * oldBuy) + (v.qty * v.price)) / (oldQty + v.qty)).toFixed(2) : v.price;
+      p.qty = +(p.qty + v.qty).toFixed(3);
+
+      custPayments.push({ id: id(), customerId: c.id, date: new Date().toISOString(),
+        amount: v.value, kind: "goods", productId: p.id, productName: p.name,
+        unit: p.unit, qty: v.qty, unitPrice: v.price });
+
+      save(LS_CUST, customers); save(LS_CPAY, custPayments); save(LS_P, products);
+      renderCustomers(); renderProducts(); renderSaleGrid();
+      openCustomerDetail(c);
+      toast("دریافت به جنس ثبت شد ✓ موجودی زیاد شد");
+
+      // اگر با این نرخ در ضرر می‌فروشید، همان‌جا اخطار بدهد
+      var a = marginAlert(p, oldBuy, false, false);
+      if (a) setTimeout(function () { openPriceAlerts([a]); }, 350);
+    }
+
+    draw();
   }
 
   function openCustomerPay(c) {
@@ -2461,7 +2643,8 @@
 
     // صندوق نقد: پیسه‌ای که باید در دست باشد
     r.cashIn = r.cash;
-    custPayments.forEach(function (x) { if (new Date(x.date) >= start) r.cashIn += x.amount; });
+    // دریافت «به جنس» پول نقد نیست، پس در صندوق نمی‌آید
+    custPayments.forEach(function (x) { if (!isGoodsPay(x) && new Date(x.date) >= start) r.cashIn += x.amount; });
     purchases.forEach(function (pu) { if (new Date(pu.date) >= start) r.cashOut += (pu.paid || 0); });
     supPayments.forEach(function (x) { if (new Date(x.date) >= start) r.cashOut += x.amount; });
     r.cashOut += r.expenses;
@@ -2973,6 +3156,7 @@
         label: s.returnOf ? "برگشتی فروش نقد" : "فروش نقد" });
     });
     custPayments.forEach(function (p) {
+      if (isGoodsPay(p)) return; // به جنس بود، پولی داخل صندوق نشد
       var c = findC(p.customerId);
       out.push({ date: p.date, amount: p.amount, label: "دریافت از " + (c ? c.name : "مشتری") });
     });

@@ -1301,6 +1301,11 @@
     renderChange();
   }
 
+  // کانال فروش: دوکان (پیش‌فرض) یا بازار. فروش‌های کهنه channel ندارند،
+  // پس نبودنش یعنی «دوکان» — هیچ رقم گذشته تغییر نمی‌کند.
+  // برگشتی همان کانال فروش اصلی را می‌گیرد، ورنه رقم‌های کانال نادرست می‌شد.
+  function saleChannel(s) { return (s && s.channel === "bazaar") ? "bazaar" : "shop"; }
+
   function finishSale(type, customerName) {
     if (cart.length === 0) return;
     // فروش قرضی بدون نام اجازه ندارد — ورنه پول در دفتر قرض گم می‌شود
@@ -1358,7 +1363,7 @@
     sale.returned = true;
     sales.push({ id: id(), date: new Date().toISOString(), total: -sale.total,
       paymentType: sale.paymentType, customerName: sale.customerName, customerId: sale.customerId,
-      items: items, returnOf: sale.id });
+      channel: saleChannel(sale), items: items, returnOf: sale.id });
     save(LS_S, sales); save(LS_P, products); save(LS_CUST, customers);
     renderSaleGrid(); renderCustomers();
     buzz(30);
@@ -1375,6 +1380,7 @@
           function pad(n) { return n < 10 ? "0" + n : n; }
           var time = pad(t.getHours()) + ":" + pad(t.getMinutes());
           var kind = s.paymentType === "cash" ? "نقد" : "قرض" + (s.customerName ? " — " + esc(s.customerName) : "");
+          if (saleChannel(s) === "bazaar") kind = "🏪 بازار — " + kind;
           var isRet = !!s.returnOf;
           var btn = (isRet || s.returned) ? '' :
             '<button class="wbtn" data-ret="' + s.id + '" style="background:var(--danger)">برگشتی</button>';
@@ -2353,6 +2359,146 @@
     $("#cGoodsBtn").addEventListener("click", function () { openCustomerGoods(c); });
   }
 
+  // ---------- فروش بازار ----------
+  // جنسی که به‌جای پول از مشتری گرفته شده (تخم مرغ، آرد) در بازار به نقد
+  // فروخته می‌شود. رکوردش همان رکورد فروش عادی است، فقط channel="bazaar"،
+  // پس موجودی، قیمت تمام‌شد و فایده خودکار درست حساب می‌شوند — ولی در
+  // گزارش‌ها جدا دیده می‌شود.
+  // عمداً جدا از صفحهٔ فروش است (نه یک دکمهٔ حالت): اگر حالت روشن می‌ماند،
+  // فروش‌های دوکان اشتباهی بازار ثبت می‌شدند و هر دو رقم خراب می‌شد.
+  function renderBazaar(el) {
+    var head = '<div class="subhead"><button class="back moreBack" aria-label="بازگشت">→</button><h3>فروش بازار</h3></div>';
+    if (products.length === 0) {
+      el.innerHTML = head + '<div class="empty"><div class="big">🏪</div><p>هنوز جنسی نیست.</p></div>';
+      return;
+    }
+    var r = computeReport("all");
+    var mine = sales.filter(function (s) { return saleChannel(s) === "bazaar"; })
+      .sort(function (a, b) { return (b.date || "").localeCompare(a.date || ""); });
+    var rows = mine.length === 0
+      ? '<p style="color:var(--ink-soft);text-align:center;padding:10px;font-size:14px">هنوز فروش بازاری ثبت نشده</p>'
+      : mine.slice(0, 40).map(function (s) {
+          var it = (s.items || [])[0] || {};
+          var prof = (s.items || []).reduce(function (a, x) {
+            return a + x.quantity * (x.sellPrice - (x.buyPrice || 0)); }, 0);
+          return '<div class="iline"><div class="in"><b>' + esc(it.productName || "—") +
+            (s.returnOf ? ' <span class="retbadge">برگشتی</span>' : '') + '</b>' +
+            '<small class="num">' + fmtDate(s.date) + ' • ' + nf.format(it.quantity || 0) +
+              ' × ' + money(it.sellPrice || 0) + '</small></div>' +
+            '<div class="lt num" style="color:' + (prof >= 0 ? "var(--primary)" : "var(--danger)") + '">' +
+              money(s.total) + '<br><small>فایده ' + nf.format(+prof.toFixed(2)) + '</small></div></div>';
+        }).join("");
+
+    el.innerHTML = head +
+      '<p style="padding:8px 14px 0;color:var(--ink-soft);font-size:13.5px;line-height:1.9">' +
+        'جنسی که در بازار به <b>پول نقد</b> می‌فروشید. پول داخل صندوق می‌آید و ' +
+        'در گزارش‌ها جدا از فروش دوکان نشان داده می‌شود.</p>' +
+      '<div style="padding:8px 14px 0"><button class="addline" id="bzNew" style="margin:0;border-style:solid;background:var(--primary);color:var(--primary-ink);border-color:var(--primary)">＋ ثبت فروش بازار</button></div>' +
+      '<div style="padding:10px 14px 0"><div class="sumbox">' +
+        '<div class="sumrow"><span>مجموع فروش بازار</span><span class="num">' + money(r.bazaarSales) + '</span></div>' +
+        '<div class="sumrow total"><span>فایدهٔ فروش بازار</span><span class="num" style="color:' +
+          (r.bazaarProfit >= 0 ? "var(--primary)" : "var(--danger)") + '">' + money(r.bazaarProfit) + '</span></div>' +
+      '</div></div>' +
+      '<div class="listhead">فروش‌های بازار</div>' + rows;
+  }
+
+  function openBazaarSale() {
+    var picked = null;
+    function draw() {
+      openSheet(
+        '<h2>🏪 فروش بازار</h2>' +
+        '<div class="field"><label>جنس</label>' +
+          '<button type="button" class="addline" id="bPick" style="margin:0;text-align:center">' +
+            (picked ? esc(picked.name) + ' — تبدیل' : '＋ انتخاب جنس') + '</button>' +
+          '<div class="err" id="eBProd">جنس را انتخاب کنید</div></div>' +
+        (picked ?
+        '<div class="field"><label>مقدار (' + unitLabel(picked.unit) + ') — موجود: ' + qtyUnit(picked.qty, picked.unit) + '</label>' +
+          '<input id="bQty" type="number" inputmode="decimal" step="any" min="0" placeholder="0" /></div>' +
+        '<div class="field"><label>نرخ فروش بازار فی ' + unitLabel(picked.unit) + ' (افغانی)</label>' +
+          '<input id="bPrice" type="number" inputmode="decimal" step="any" min="0" value="' + (picked.sell || "") + '" />' +
+          '<small style="display:block;margin-top:6px;color:var(--ink-soft);font-size:12.5px">نرخ بازار هر روز فرق می‌کند — نرخ همین معامله را بنویسید.</small></div>' +
+        '<div class="sumbox" id="bOut" style="margin-bottom:12px"></div>' : '') +
+        '<div class="actions"><button class="ghost" data-close>لغو</button>' +
+          '<button class="primary" id="bOk">💵 ثبت فروش نقد</button></div>'
+      );
+      $("#bPick").addEventListener("click", openBazaarPicker);
+      if (picked) {
+        $("#bQty").addEventListener("input", refresh);
+        $("#bPrice").addEventListener("input", refresh);
+        refresh();
+        setTimeout(function () { $("#bQty").focus(); }, 60);
+      }
+      $("#bOk").addEventListener("click", commit);
+    }
+    function vals() {
+      if (!picked) return null;
+      var q = parseFloat($("#bQty").value), pr = parseFloat($("#bPrice").value);
+      if (!(q > 0) || !(pr >= 0)) return null;
+      return { qty: q, price: pr, total: +(q * pr).toFixed(2),
+               profit: +(q * (pr - (picked.buy || 0))).toFixed(2) };
+    }
+    function refresh() {
+      var v = vals(), out = $("#bOut");
+      if (!v) { out.innerHTML = '<div class="sumrow"><span>مجموع</span><span class="num">—</span></div>'; return; }
+      var over = v.qty > picked.qty;
+      out.innerHTML =
+        '<div class="sumrow"><span>قیمت خرید فی ' + unitLabel(picked.unit) + '</span><span class="num">' + money(picked.buy || 0) + '</span></div>' +
+        '<div class="sumrow"><span>مجموع فروش</span><span class="num">' + money(v.total) + '</span></div>' +
+        '<div class="sumrow total"><span>' + (v.profit < 0 ? "ضرر این معامله" : "فایدهٔ این معامله") + '</span>' +
+          '<span class="num" style="color:' + (v.profit < 0 ? "var(--danger)" : "var(--primary)") + '">' + money(Math.abs(v.profit)) + '</span></div>' +
+        (over ? '<p style="font-size:12.5px;color:var(--danger);line-height:1.8;margin:8px 0 0">' +
+          'اخطار: موجودی فقط ' + qtyUnit(picked.qty, picked.unit) + ' است. اگر ثبت کنید، موجودی منفی می‌شود.</p>' : '');
+    }
+    function openBazaarPicker() {
+      // جنس‌هایی که موجود دارند اول، تا در بازار زود پیدا شوند
+      var list = products.slice().sort(function (a, b) {
+        var oa = a.qty > 0 ? 0 : 1, ob = b.qty > 0 ? 0 : 1;
+        if (oa !== ob) return oa - ob;
+        return a.name.localeCompare(b.name, "fa");
+      });
+      openSheet(
+        '<h2>کدام جنس؟</h2>' +
+        list.map(function (p) {
+          return '<div class="iline" data-bp="' + p.id + '" role="button" tabindex="0" style="cursor:pointer">' +
+            '<div class="in"><b>' + esc(p.name) + '</b><small class="num">موجود: ' + qtyUnit(p.qty, p.unit) +
+              ' • خرید: ' + money(p.buy || 0) + '</small></div>' +
+            '<div class="lt num">' + money(p.sell) + '</div></div>';
+        }).join("") +
+        '<div class="actions"><button class="ghost" id="bBack">بازگشت</button></div>'
+      );
+      $("#bBack").addEventListener("click", draw);
+      sheet.querySelectorAll("[data-bp]").forEach(function (el) {
+        el.addEventListener("click", function () {
+          var p = findP(el.dataset.bp);
+          picked = { id: p.id, name: p.name, unit: p.unit, qty: p.qty, buy: p.buy || 0, sell: p.sell };
+          draw();
+        });
+      });
+    }
+    function commit() {
+      if (!picked) { $("#eBProd").classList.add("show"); return; }
+      var v = vals();
+      if (!v) { toast("مقدار و نرخ را درست بنویسید", true); return; }
+      var p = findP(picked.id);
+      if (!p) { toast("جنس پیدا نشد", true); return; }
+      if (v.qty > p.qty) toast("اخطار: موجودی «" + p.name + "» کمتر از این مقدار است", true);
+
+      // همان ساختار فروش عادی — نرخ فروش و قیمت خرید لحظهٔ فروش عکس گرفته
+      // می‌شوند، تا تغییر بعدی نرخ‌ها فایدهٔ این فروش را خراب نکند.
+      sales.push({ id: id(), date: new Date().toISOString(), total: v.total,
+        paymentType: "cash", customerName: null, customerId: null, channel: "bazaar",
+        items: [{ productId: p.id, productName: p.name, quantity: v.qty,
+                  sellPrice: v.price, buyPrice: p.buy || 0, buyEst: !!p.buyEstimated }] });
+      p.qty = +(p.qty - v.qty).toFixed(3);
+      save(LS_S, sales); save(LS_P, products);
+      closeSheet();
+      renderSaleGrid(); renderProducts(); renderMore();
+      buzz(30);
+      toast("فروش بازار ثبت شد ✓ پول در صندوق آمد");
+    }
+    draw();
+  }
+
   // ---------- دریافت به جنس ----------
   // مشتری پول ندارد و به‌جایش جنس می‌دهد (تخم مرغ به ۵، آرد کیلو ۱۰).
   // یک رویداد با سه اثر که باید یکجا ثبت شوند، ورنه یکی از سه رقم غلط می‌ماند:
@@ -2553,6 +2699,7 @@
     if (moreView === "count") { renderCount(el); return; }
     if (moreView === "margins") { renderMargins(el); return; }
     if (moreView === "cash") { renderCash(el); return; }
+    if (moreView === "bazaar") { renderBazaar(el); return; }
     if (moreView === "sync") { renderSync(el); return; }
     el.innerHTML =
       '<div class="menu-item" data-more="reports">' +
@@ -2563,6 +2710,11 @@
       '<div class="menu-item" data-more="cash">' +
         '<div class="mico" style="background:var(--primary-soft);color:var(--primary)">💰</div>' +
         '<div class="mtx"><b>صندوق</b><small>پول نقد موجود، شمارش شبانه و رد پول</small></div>' +
+        '<div class="chev">‹</div>' +
+      '</div>' +
+      '<div class="menu-item" data-more="bazaar">' +
+        '<div class="mico" style="background:var(--credit-soft);color:var(--credit)">🏪</div>' +
+        '<div class="mtx"><b>فروش بازار</b><small>فروش نقد در بازار — جدا از فروش دوکان</small></div>' +
         '<div class="chev">‹</div>' +
       '</div>' +
       '<div class="menu-item" data-more="margins">' +
@@ -2617,10 +2769,15 @@
   function computeReport(period) {
     var start = periodStart(period);
     var r = { totalSales: 0, cash: 0, credit: 0, cogs: 0, wasteLoss: 0, expenses: 0, profit: 0, netProfit: 0,
-              cashIn: 0, cashOut: 0, cashBox: 0, cashShort: 0, estCogs: 0, estNames: {}, perProduct: {} };
+              cashIn: 0, cashOut: 0, cashBox: 0, cashShort: 0, estCogs: 0, estNames: {}, perProduct: {},
+              // فروش دوکان و فروش بازار جدا — تا معلوم شود کدام یکی چقدر می‌دهد.
+              // فایدهٔ اینجا پیش از ضایعات و کسری صندوق است (آن‌ها به کانال بند نیستند).
+              shopSales: 0, bazaarSales: 0, shopProfit: 0, bazaarProfit: 0 };
     sales.forEach(function (s) {
       if (new Date(s.date) < start) return;
+      var isBazaar = saleChannel(s) === "bazaar";
       r.totalSales += s.total;
+      if (isBazaar) r.bazaarSales += s.total; else r.shopSales += s.total;
       if (s.paymentType === "cash") r.cash += s.total; else r.credit += s.total;
       (s.items || []).forEach(function (it) {
         var p = findP(it.productId);
@@ -2629,6 +2786,7 @@
         var cost = it.quantity * buy;
         var prof = it.quantity * (it.sellPrice - buy);
         r.cogs += cost;
+        if (isBazaar) r.bazaarProfit += prof; else r.shopProfit += prof;
         // اگر قیمت خرید لحظهٔ فروش تخمینی بود (یا جنس هنوز تخمینی است)
         var wasEst = (it.buyEst !== undefined) ? it.buyEst : (p ? !!p.buyEstimated : false);
         if (wasEst) { r.estCogs += cost; r.estNames[it.productName] = 1; }
@@ -2658,6 +2816,8 @@
         else { r.cashOut += -e.amount; r.cashShort += -e.amount; } // کسری = ضرر واقعی
       }
     });
+    r.shopProfit = +r.shopProfit.toFixed(2); r.bazaarProfit = +r.bazaarProfit.toFixed(2);
+    r.shopSales = +r.shopSales.toFixed(2); r.bazaarSales = +r.bazaarSales.toFixed(2);
     r.cashBox = +(r.cashIn - r.cashOut).toFixed(2);
     // کسری صندوق مثل کسری شمارش اجناس، از فایده کم می‌شود
     r.profit = +(r.profit - r.cashShort).toFixed(2);
@@ -2716,6 +2876,18 @@
           row("فروش نقد", r.cash) +
           row("فروش قرض", r.credit) +
         '</div>' +
+        // فروش دوکان و بازار جدا — فقط وقتی فروش بازاری بوده باشد
+        (r.bazaarSales !== 0 ?
+        '<div class="sumbox">' +
+          '<div class="sumrow"><span>فروش دوکان</span><span class="num">' + money(r.shopSales) + '</span></div>' +
+          '<div class="sumrow"><span>فایدهٔ فروش دوکان</span><span class="num" style="color:' +
+            (r.shopProfit >= 0 ? "var(--primary)" : "var(--danger)") + '">' + money(r.shopProfit) + '</span></div>' +
+          '<div class="sumrow"><span>فروش بازار</span><span class="num">' + money(r.bazaarSales) + '</span></div>' +
+          '<div class="sumrow"><span>فایدهٔ فروش بازار</span><span class="num" style="color:' +
+            (r.bazaarProfit >= 0 ? "var(--primary)" : "var(--danger)") + '">' + money(r.bazaarProfit) + '</span></div>' +
+          '<p style="font-size:12.5px;color:var(--ink-soft);line-height:1.8;margin:8px 0 0">' +
+            'فایدهٔ اینجا <b>پیش از</b> ضایعات، کسری صندوق و مصارف خانه است — آن‌ها به دوکان یا بازار بند نیستند.</p>' +
+        '</div>' : '') +
         '<div class="sumbox">' +
           row("قیمت تمام‌شد اجناس فروخته‌شده", r.cogs) +
           row("ضرر ضایعات", r.wasteLoss) +
@@ -3868,6 +4040,7 @@
     if (e.target.closest(".moreBack")) { moreView = null; renderMore(); return; }
     if (e.target.closest("#newWasteBtn")) { openWastePicker(); return; }
     if (e.target.closest("#groupPriceBtn")) { openGroupPrice(); return; }
+    if (e.target.closest("#bzNew")) { openBazaarSale(); return; }
     if (e.target.closest("#cashCountBtn")) { openCashCount(); return; }
     if (e.target.closest("#cashInBtn")) { openCashEntry("in"); return; }
     if (e.target.closest("#cashOutBtn")) { openCashEntry("out"); return; }

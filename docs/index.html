@@ -783,6 +783,86 @@
     return +(b.opening + b.sales + b.custPaid + b.manualIn + b.adjust -
              b.purchasePaid - b.supPaid - b.expenses - b.manualOut).toFixed(2);
   }
+  // جمع همهٔ حرکت‌ها بدون موجودی اول — برای حساب‌کردن موجودی اولِ درست
+  // از روی پول شمرده‌شدهٔ امشب: موجودی اول = پول واقعی − همین جمع.
+  function cashNetWithoutOpening() {
+    var b = cashBreakdown();
+    return +(b.sales + b.custPaid + b.manualIn + b.adjust -
+             b.purchasePaid - b.supPaid - b.expenses - b.manualOut).toFixed(2);
+  }
+
+  // ---------- محافظ صندوق ----------
+  // در واقعیت از جعبه‌ای که ۳٬۰۰۰ دارد ۵٬۰۰۰ پرداخته نمی‌شود، پس صندوق
+  // نباید منفی شود. هر جایی که پول از صندوق خارج می‌شود از اینجا می‌گذرد.
+  //
+  // تلهٔ مهم: اگر «موجودی اول» ثبت نشده باشد، رقم صندوق خودش غلط و پایین
+  // است. آن‌وقت این محافظ خرید نقدیِ واقعی را به قرض ساختگی تبدیل می‌کرد
+  // و روزی دفتر دوکان با دفتر تامین‌کننده جور نمی‌آمد — این از منفی‌بودن
+  // صندوق بدتر است. پس در آن حالت هیچ رقمی عوض نمی‌شود؛ فقط ثبت موجودی
+  // اول خواسته می‌شود، و راه «به‌هرحال ثبت کن» هم باز می‌ماند.
+  //
+  // o = { amount, what, fundNote, proceed(amount), creditLabel(bal, short),
+  //       onCredit(bal, short), onBack() }
+  // اگر پول کافی باشد true برمی‌گرداند و کار همان‌جا ادامه می‌یابد؛
+  // ورنه شیت باز می‌شود، false برمی‌گردد و تصمیم با دکمه‌های شیت است.
+  function guardCashOut(o) {
+    var bal = cashBalance();
+    if (o.amount <= bal) return true;
+    var short = +(o.amount - bal).toFixed(2);
+
+    function back() { closeSheet(); if (o.onBack) o.onBack(); }
+
+    if (!cashOpeningEntry()) {
+      openSheet(
+        '<h2 style="color:var(--credit)">موجودی اول صندوق ثبت نشده</h2>' +
+        '<p style="font-size:14.5px;line-height:2;margin:-4px 0 14px">' +
+          'دفتر صندوق از <b>صفر</b> شروع شده، پس رقمش (' + money(bal) + ') پایین‌تر از ' +
+          'واقعیت است و اپ نمی‌داند پول کافی هست یا نی.<br>' +
+          '<b>تا این ثبت نشود، اپ رقم شما را به قرض تبدیل نمی‌کند</b> — ورنه قرض ساختگی ' +
+          'در دفتر می‌نشست.</p>' +
+        '<div class="actions"><button class="ghost" id="lcBack">لغو</button>' +
+          '<button class="primary" id="lcOpening">ثبت موجودی اول</button></div>' +
+        '<button class="ghost" id="lcAnyway" style="width:100%;margin-top:10px">به‌هرحال همین‌طور ثبت کن</button>'
+      );
+      $("#lcOpening").addEventListener("click", function () { closeSheet(); openCashEntry("opening"); });
+      $("#lcAnyway").addEventListener("click", function () { closeSheet(); o.proceed(o.amount); });
+      $("#lcBack").addEventListener("click", back);
+      return false;
+    }
+
+    var creditBtn = o.creditLabel
+      ? '<button class="wbtn" id="lcCredit" style="width:100%;padding:13px;margin-bottom:9px;background:var(--credit)">' +
+          esc(o.creditLabel(bal, short)) + '</button>'
+      : '';
+    openSheet(
+      '<h2 style="color:var(--danger)">پول صندوق کم است</h2>' +
+      '<div class="sumbox" style="margin-bottom:12px">' +
+        '<div class="sumrow"><span>پول در صندوق</span><span class="num">' + money(bal) + '</span></div>' +
+        '<div class="sumrow"><span>' + esc(o.what) + '</span><span class="num">' + money(o.amount) + '</span></div>' +
+        '<div class="sumrow total"><span>کم است</span><span class="num" style="color:var(--danger)">' + money(short) + '</span></div>' +
+      '</div>' +
+      '<p style="font-size:13.5px;line-height:1.9;color:var(--ink-soft);margin:0 0 12px">' +
+        'صندوق منفی نمی‌شود. یکی از این راه‌ها را بزنید:</p>' +
+      creditBtn +
+      '<button class="wbtn" id="lcFund" style="width:100%;padding:13px;background:var(--primary)">' +
+        'پول از جای دیگر آمد — ' + money(short) + ' «پول داخل» ثبت شود</button>' +
+      '<div class="actions"><button class="ghost" id="lcBack" style="width:100%">رقم را اصلاح می‌کنم</button></div>'
+    );
+    if (o.creditLabel) {
+      $("#lcCredit").addEventListener("click", function () {
+        closeSheet(); o.onCredit(bal, short);
+      });
+    }
+    $("#lcFund").addEventListener("click", function () {
+      cashEntries.push({ id: id(), date: new Date().toISOString(), kind: "in",
+        amount: short, note: o.fundNote || "پول از جای دیگر" });
+      save(LS_CASH, cashEntries);
+      closeSheet(); o.proceed(o.amount);
+    });
+    $("#lcBack").addEventListener("click", back);
+    return false;
+  }
+
   // کلید روز شمسی، برای اینکه شمارش هر شب یکی باشد
   function dayKeyOf(d) {
     var j = toJalali(d); if (!j) return "";
@@ -1989,6 +2069,28 @@
 
     var total = 0; validLines.forEach(function (l) { total += l.qty * l.buyPrice; });
     var paid = draft.paid || 0;
+
+    // صندوق نباید منفی شود. اگر پول کافی نیست، خودِ دوکان‌دار تصمیم
+    // می‌گیرد: باقی قرض تامین‌کننده شود، یا پول از جای دیگر آمده باشد.
+    if (paid > 0) {
+      var d = draft; // draft داخل commitPurchase پاک می‌شود
+      var ok = guardCashOut({
+        amount: paid,
+        what: "پرداخت این فاکتور",
+        fundNote: "برای خرید — " + name,
+        creditLabel: function (bal, short) {
+          return "فقط " + money(bal) + " پرداخت شد — " + money(short) + " قرض تامین‌کننده";
+        },
+        onCredit: function (bal) { draft = d; commitPurchase(validLines, total, bal, name); },
+        proceed: function (amt) { draft = d; commitPurchase(validLines, total, amt, name); },
+        onBack: function () { draft = d; renderPurchaseForm(); }
+      });
+      if (!ok) return;
+    }
+    commitPurchase(validLines, total, paid, name);
+  }
+
+  function commitPurchase(validLines, total, paid, name) {
     var remaining = Math.max(0, total - paid);
 
     var sup = null;
@@ -2110,9 +2212,7 @@
       '<div class="actions"><button class="ghost" data-close>لغو</button>' +
         '<button class="primary" id="payOk">ثبت پرداخت</button></div>'
     );
-    $("#payOk").addEventListener("click", function () {
-      var amt = parseFloat($("#payAmt").value) || 0;
-      if (amt <= 0) return;
+    function commitPay(amt) {
       // خودِ رسید پرداخت رویداد کم‌شدن قرض است؛ اگر بیشتر از قرض بود،
       // رقم منفی می‌شود و «پیش‌پرداخت» نشان داده می‌شود.
       supPayments.push({ id: id(), supplierId: s.id, date: new Date().toISOString(), amount: amt });
@@ -2120,6 +2220,21 @@
       renderSuppliers();
       openSupplierDetail(s); // بازکردن دوباره تا رسید جدید دیده شود
       toast("رسید پرداخت ثبت شد ✓");
+    }
+    $("#payOk").addEventListener("click", function () {
+      var amt = parseFloat($("#payAmt").value) || 0;
+      if (amt <= 0) return;
+      // پول این پرداخت از صندوق می‌رود، پس صندوق نباید منفی شود
+      if (!guardCashOut({
+        amount: amt,
+        what: "پرداخت به " + s.name,
+        fundNote: "برای پرداخت به " + s.name,
+        creditLabel: function (bal) { return "فقط " + money(bal) + " پرداخت شد — باقی قرض بماند"; },
+        onCredit: function (bal) { if (bal > 0) commitPay(bal); else toast("صندوق خالی است", true); },
+        proceed: function (a) { commitPay(a); },
+        onBack: function () { openPayDialog(s); }
+      })) return;
+      commitPay(amt);
     });
     setTimeout(function () { $("#payAmt").focus(); }, 60);
   }
@@ -2903,6 +3018,20 @@
       '<small style="color:var(--credit)">امشب پول صندوق را بشمارید و همان را اینجا بگذارید — تا رقم‌ها از اول درست باشد.</small></div></div>' +
       '<div style="padding:0 14px 6px"><button class="addline" id="setOpeningBtn" style="margin:0;border-color:var(--credit);background:var(--credit-soft);color:var(--credit)">＋ ثبت موجودی اول صندوق</button></div>';
 
+    // صندوق منفی یعنی اپ پول خارج‌شده را بیشتر از پول داخل‌شده می‌داند.
+    // فقط رقم سرخ نشان‌دادن کافی نیست؛ دلیلش هم نوشته شود.
+    var negCard = bal >= 0 ? "" :
+      '<div style="margin:6px 14px 0;border:2px solid var(--danger);border-radius:14px;padding:13px">' +
+        '<b style="color:var(--danger);font-size:16px">صندوق منفی است</b>' +
+        '<p style="font-size:13.5px;line-height:1.95;color:var(--ink-soft);margin:8px 0 0">' +
+          'در واقعیت پول نقد از صفر پایین‌تر نمی‌رود، پس یکی از این‌هاست:<br>' +
+          (hasOpening ? '' : '• <b>موجودی اول ثبت نشده</b> — محتمل‌ترین دلیل؛ دفتر از صفر شروع شده.<br>') +
+          '• در یک <b>فاکتور خرید</b> مبلغ «پرداخت‌شده» بیشتر از واقعیت نوشته شده.<br>' +
+          '• <b>فروش‌ها</b> کامل ثبت نمی‌شوند ولی خرید و مصرف ثبت می‌شود.<br>' +
+          'در «رد پول» پایین، سطرهای درشت را با فاکتورشان مقایسه کنید.' +
+        '</p>' +
+      '</div>';
+
     var moves = cashMovements();
     var moveHtml = moves.length === 0
       ? '<p style="color:var(--ink-soft);text-align:center;padding:10px;font-size:14px">هنوز حرکتی نیست</p>'
@@ -2914,7 +3043,7 @@
             '<div class="lt num" style="color:' + col + '">' + sign + ' ' + money(Math.abs(m.amount)) + '</div></div>';
         }).join("");
 
-    el.innerHTML = head + openingBtn +
+    el.innerHTML = head + openingBtn + negCard +
       '<div style="padding:6px 14px 0">' +
         '<div class="sumbox" style="text-align:center;padding:16px">' +
           '<div style="font-size:15px;color:var(--ink-soft);font-weight:700">پول در صندوق</div>' +
@@ -2991,38 +3120,108 @@
   }
 
   // پول دستی داخل/خارج + موجودی اول
+  // موجودی اول صندوق — همیشه اولین رویداد دفتر است، پس روی همهٔ فروش و
+  // خریدهای ثبت‌شده جمع می‌شود. اگر کسی پول امروز را اینجا بنویسد، رقم
+  // صندوق دوبار حساب می‌شود و بلندتر از واقعیت نشان می‌دهد. برای همین
+  // دو راه داده شده و راه پیش‌فرض «شمردن پول امشب» است، چون پول دیروز و
+  // پریروز را کسی به یاد ندارد ولی پول امشب را می‌شود شمرد.
+  function openCashOpening() {
+    var net = cashNetWithoutOpening();
+    var mode = "count"; // count | know
+    openSheet(
+      '<h2>موجودی اول صندوق</h2>' +
+      '<p style="margin:-6px 0 12px;color:var(--ink-soft);font-size:13.5px;line-height:1.9">' +
+        'این نقطهٔ شروع دفتر صندوق است — پولی که <b>پیش از شروع اپ</b> در جعبه بود.</p>' +
+      '<div class="seg" id="obMode" style="margin-bottom:14px">' +
+        '<button type="button" data-m="count" class="on">پول امشب را می‌شمارم</button>' +
+        '<button type="button" data-m="know">پول اول را می‌دانم</button>' +
+      '</div>' +
+      '<div class="field"><label id="obLbl">پولی که همین حالا در جعبه است (افغانی)</label>' +
+        '<input id="obAmt" type="number" inputmode="decimal" step="any" min="0" placeholder="0" /></div>' +
+      '<div id="obOut" class="sumbox" style="display:none;margin-bottom:12px"></div>' +
+      '<div class="actions"><button class="ghost" data-close>لغو</button>' +
+        '<button class="primary" id="obOk">ثبت</button></div>'
+    );
+    function computed() {
+      var v = parseFloat($("#obAmt").value);
+      if ($("#obAmt").value === "" || isNaN(v)) return null;
+      return mode === "count" ? +(v - net).toFixed(2) : +v.toFixed(2);
+    }
+    function refresh() {
+      var out = $("#obOut");
+      var c = computed();
+      if (mode !== "count" || c === null) { out.style.display = "none"; return; }
+      out.style.display = "block";
+      out.innerHTML =
+        '<div class="sumrow"><span>پول شمرده‌شدهٔ امشب</span><span class="num">' + money(parseFloat($("#obAmt").value)) + '</span></div>' +
+        // این سطر از پول شمرده‌شده کم می‌شود، پس نشانش برعکسِ خود رقم است
+        '<div class="sumrow"><span>جمع حرکت‌های ثبت‌شده</span><span class="num">' + (net < 0 ? "＋ " : "− ") + money(Math.abs(net)) + '</span></div>' +
+        '<div class="sumrow total"><span>موجودی اول</span><span class="num">' + money(c) + '</span></div>' +
+        (c < 0 ? '<p style="font-size:12.5px;color:var(--danger);line-height:1.8;margin:8px 0 0">' +
+          'منفی شد — یعنی پولی از جعبه رفته که در اپ ثبت نشده. رقم صندوق درست ' +
+          'می‌شود، ولی بهتر است ببینید کدام خرید یا مصرف ثبت نشده.</p>' : '');
+    }
+    sheet.querySelectorAll("#obMode button").forEach(function (b) {
+      b.addEventListener("click", function () {
+        mode = b.dataset.m;
+        sheet.querySelectorAll("#obMode button").forEach(function (x) { x.classList.toggle("on", x === b); });
+        $("#obLbl").textContent = mode === "count"
+          ? "پولی که همین حالا در جعبه است (افغانی)"
+          : "پولی که پیش از شروع اپ در جعبه بود (افغانی)";
+        refresh();
+      });
+    });
+    $("#obAmt").addEventListener("input", refresh);
+    $("#obOk").addEventListener("click", function () {
+      var c = computed();
+      if (c === null) { toast("مبلغ را درست بنویسید", true); return; }
+      if (mode === "know" && c < 0) { toast("مبلغ را درست بنویسید", true); return; }
+      // موجودی اول یکی است؛ اگر بود، جای‌گزین می‌شود
+      cashEntries = cashEntries.filter(function (e) { return e.kind !== "opening"; });
+      cashEntries.push({ id: id(), date: new Date().toISOString(), kind: "opening", amount: c });
+      save(LS_CASH, cashEntries);
+      closeSheet(); renderMore();
+      toast("موجودی اول ثبت شد ✓");
+    });
+    setTimeout(function () { $("#obAmt").focus(); }, 60);
+  }
+
   function openCashEntry(kind) {
-    var isIn = kind === "in", isOpening = kind === "opening";
-    var title = isOpening ? "موجودی اول صندوق" : (isIn ? "＋ پول داخل صندوق" : "− پول خارج از صندوق");
-    var hint = isOpening
-      ? 'پولی که همین حالا در صندوق دارید. این نقطهٔ شروع دفتر صندوق است.'
-      : (isIn ? 'مثلاً: از خانه آوردم، سرمایهٔ نو.'
-              : '<b style="color:var(--danger)">خرچ خانه را اینجا ننویسید</b> — آن را در «مصارف خانه» ثبت کنید، ورنه دوبار کم می‌شود.<br>اینجا برای: به بانک بردم، به کسی قرض دادم، و مانند آن.');
+    if (kind === "opening") return openCashOpening();
+    var isIn = kind === "in";
+    var title = isIn ? "＋ پول داخل صندوق" : "− پول خارج از صندوق";
+    var hint = isIn ? 'مثلاً: از خانه آوردم، سرمایهٔ نو.'
+              : '<b style="color:var(--danger)">خرچ خانه را اینجا ننویسید</b> — آن را در «مصارف خانه» ثبت کنید، ورنه دوبار کم می‌شود.<br>اینجا برای: به بانک بردم، به کسی قرض دادم، و مانند آن.';
     openSheet(
       '<h2>' + title + '</h2>' +
       '<p style="margin:-6px 0 12px;color:var(--ink-soft);font-size:13.5px;line-height:1.9">' + hint + '</p>' +
       '<div class="field"><label>مبلغ (افغانی)</label>' +
         '<input id="ceAmt" type="number" inputmode="decimal" step="any" min="0" placeholder="0" /></div>' +
-      (isOpening ? '' :
-        '<div class="field"><label>توضیح (اختیاری)</label>' +
-        '<input id="ceNote" type="text" placeholder="مثلاً: از خانه" /></div>') +
+      '<div class="field"><label>توضیح (اختیاری)</label>' +
+        '<input id="ceNote" type="text" placeholder="مثلاً: از خانه" /></div>' +
       '<div class="actions"><button class="ghost" data-close>لغو</button>' +
         '<button class="primary" id="ceOk">ثبت</button></div>'
     );
     $("#ceOk").addEventListener("click", function () {
       var v = parseFloat($("#ceAmt").value);
       if (!(v > 0)) { toast("مبلغ را درست بنویسید", true); return; }
-      if (isOpening) {
-        // موجودی اول یکی است؛ اگر بود، جای‌گزین می‌شود
-        cashEntries = cashEntries.filter(function (e) { return e.kind !== "opening"; });
-        cashEntries.push({ id: id(), date: new Date().toISOString(), kind: "opening", amount: v });
-      } else {
+      var note = $("#ceNote").value.trim();
+      var commitEntry = function () {
         cashEntries.push({ id: id(), date: new Date().toISOString(), kind: kind,
-          amount: v, note: ($("#ceNote") ? $("#ceNote").value.trim() : "") });
-      }
-      save(LS_CASH, cashEntries);
-      closeSheet(); renderMore();
-      toast("ثبت شد ✓");
+          amount: v, note: note });
+        save(LS_CASH, cashEntries);
+        closeSheet(); renderMore();
+        toast("ثبت شد ✓");
+      };
+      // «پول خارج» هم صندوق را منفی کرده می‌تواند
+      if (!isIn && !guardCashOut({
+        amount: v,
+        what: "این پول خارج" + (note ? " — " + note : ""),
+        fundNote: "پول از جای دیگر",
+        proceed: function () { commitEntry(); },
+        onBack: function () { openCashEntry(kind); }
+      })) return;
+      commitEntry();
     });
     setTimeout(function () { $("#ceAmt").focus(); }, 60);
   }
@@ -3253,10 +3452,23 @@
       var bad = !($("#expAmt").value !== "" && !isNaN(amt) && amt > 0);
       $("#eExpAmt").classList.toggle("show", bad);
       if (bad) return;
-      expenses.push({ id: id(), date: new Date().toISOString(), amount: amt, note: $("#expNote").value.trim() });
-      save(LS_EXP, expenses);
-      closeSheet(); renderMore();
-      toast("مصرف ثبت شد ✓");
+      var note = $("#expNote").value.trim();
+      function commitExp() {
+        expenses.push({ id: id(), date: new Date().toISOString(), amount: amt, note: note });
+        save(LS_EXP, expenses);
+        closeSheet(); renderMore();
+        toast("مصرف ثبت شد ✓");
+      }
+      // مصرف خانه هم از صندوق می‌رود. اینجا «به قرض برود» معنی ندارد،
+      // پس فقط دو راه: پول از جای دیگر آمده، یا رقم اصلاح شود.
+      if (!guardCashOut({
+        amount: amt,
+        what: "این مصرف" + (note ? " — " + note : ""),
+        fundNote: "برای مصرف خانه" + (note ? " — " + note : ""),
+        proceed: function () { commitExp(); },
+        onBack: function () { openExpenseForm(); }
+      })) return;
+      commitExp();
     });
     setTimeout(function () { $("#expAmt").focus(); }, 60);
   }

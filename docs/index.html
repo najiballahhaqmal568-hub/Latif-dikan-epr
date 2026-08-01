@@ -711,16 +711,29 @@
   function isReversal(x) { return !!(x && x.reverseOf); }
   function isVoided(x) { return !!(x && (x.reversed || x.reverseOf)); }
 
-  // آیا این جنس بعد از این تاریخ خرید/دریافتِ دیگری داشته؟ اگر داشته،
+  // مهر زمانی دقیق رویداد. تاریخ فاکتور خرید فقط «روز» دارد (کاربر خودش
+  // انتخابش می‌کند)، پس دو فاکتور یک روز از هم فرق کرده نمی‌توانستند و
+  // باطل‌کردن اولی، قیمت خرید را خاموش غلط برمی‌گرداند. ts لحظهٔ ثبت است.
+  function eventTs(r) { return (r && (r.ts || r.date)) || ""; }
+
+  // آیا بعد از این رویداد، خرید/دریافتِ دیگری از همان جنس شده؟ اگر شده،
   // قیمت خرید اوسط دیگر به عقب برنمی‌گردد و باید خود دوکان‌دار ببیندش.
-  function hasLaterBuyEvent(productId, afterDate) {
+  function hasLaterBuyEvent(productId, rec) {
+    var mine = eventTs(rec), myId = rec && rec.id;
+    // اگر مهر زمانی دقیق نباشد و روزشان یکی باشد، محتاطانه «بعدی» شمرده
+    // می‌شود — اخطاردادن بی‌جا بهتر از برگرداندن خاموشِ رقم غلط است.
+    function isLater(other) {
+      if (other.id === myId) return false;
+      var t = eventTs(other);
+      return t >= mine;
+    }
     var later = false;
     purchases.forEach(function (pu) {
-      if (isReversal(pu) || (pu.date || "") <= (afterDate || "")) return;
+      if (isReversal(pu) || !isLater(pu)) return;
       (pu.items || []).forEach(function (it) { if (it.productId === productId) later = true; });
     });
     custPayments.forEach(function (p) {
-      if (!isGoodsPay(p) || isReversal(p) || (p.date || "") <= (afterDate || "")) return;
+      if (!isGoodsPay(p) || isReversal(p) || !isLater(p)) return;
       if (p.productId === productId) later = true;
     });
     return later;
@@ -728,11 +741,11 @@
 
   // قیمت خرید را به عکسِ پیش از این رویداد برمی‌گرداند — اگر امن باشد.
   // نام جنس‌هایی که امن نبود برگردانده می‌شود تا به کاربر گفته شود.
-  function restoreBuyPrice(productId, prevBuy, prevEst, date, warnOut) {
+  function restoreBuyPrice(productId, prevBuy, prevEst, rec, warnOut) {
     var p = findP(productId);
     if (!p) return;
     if (prevBuy === undefined || prevBuy === null) { warnOut.push(p.name); return; }
-    if (hasLaterBuyEvent(productId, date)) { warnOut.push(p.name); return; }
+    if (hasLaterBuyEvent(productId, rec)) { warnOut.push(p.name); return; }
     p.buy = prevBuy;
     p.buyEstimated = !!prevEst;
   }
@@ -751,6 +764,45 @@
         '<div class="actions"><button class="primary" data-close>فهمیدم</button></div>'
       );
     }, 300);
+  }
+
+  // ---------- محافظ موجودی ----------
+  // مثل محافظ صندوق: موجودی نباید خاموش منفی شود. اگر در شلوغی به‌جای ۵۰
+  // عدد ۵۰۰ تایپ شود، اپ تا حال بی‌صدا موجودی را −۴۵۰ می‌کرد و فایده و
+  // صندوقِ ساختگی می‌ساخت. حالا می‌پرسد.
+  // wants = [{ productId, qty }] — مقداری که از موجودی کم می‌شود
+  function stockShortages(wants) {
+    var need = {};
+    wants.forEach(function (w) { need[w.productId] = (need[w.productId] || 0) + w.qty; });
+    var out = [];
+    Object.keys(need).forEach(function (pid) {
+      var p = findP(pid); if (!p) return;
+      if (need[pid] > p.qty) out.push({ name: p.name, have: p.qty, want: +need[pid].toFixed(3), unit: p.unit });
+    });
+    return out;
+  }
+  // اگر موجودی بس است true؛ ورنه شیت باز می‌شود و false برمی‌گردد.
+  function guardStockOut(wants, what, proceed, onBack) {
+    var short = stockShortages(wants);
+    if (short.length === 0) return true;
+    openSheet(
+      '<h2 style="color:var(--danger)">موجودی کم است</h2>' +
+      '<p style="font-size:14.5px;line-height:2;margin:-4px 0 12px">' + esc(what) + '</p>' +
+      '<div class="sumbox" style="margin-bottom:12px">' +
+        short.map(function (s) {
+          return '<div class="sumrow"><span>' + esc(s.name) + '</span>' +
+            '<span class="num">موجود ' + qtyUnit(s.have, s.unit) + ' — لازم ' + qtyUnit(s.want, s.unit) + '</span></div>';
+        }).join("") +
+      '</div>' +
+      '<p style="font-size:13px;color:var(--ink-soft);line-height:1.9;margin:0 0 12px">' +
+        'اگر رقم غلط تایپ شده، اصلاحش کنید. اگر واقعاً جنس بیشتر از دفتر داشتید، ' +
+        '«به‌هرحال» را بزنید — موجودی منفی می‌شود تا با شمارش ماهانه درست گردد.</p>' +
+      '<button class="wbtn" id="stAnyway" style="width:100%;padding:13px;background:var(--danger)">به‌هرحال ثبت کن</button>' +
+      '<div class="actions"><button class="ghost" id="stBack" style="width:100%">رقم را اصلاح می‌کنم</button></div>'
+    );
+    $("#stAnyway").addEventListener("click", function () { closeSheet(); proceed(); });
+    $("#stBack").addEventListener("click", function () { closeSheet(); if (onBack) onBack(); });
+    return false;
   }
 
   // پرسیدن پیش از باطل‌کردن — با نوشتن دقیق اینکه چه چیزی پس می‌آید
@@ -780,25 +832,36 @@
       ["پرداخت‌شده (به صندوق)", "＋ " + money(pu.paid || 0)],
       ["باقی‌ماندهٔ قرض تامین‌کننده", "− " + money(pu.remaining || 0)]
     ], function () {
-      var warn = [];
-      (pu.items || []).forEach(function (it) {
-        var p = findP(it.productId);
-        if (p) p.qty = +(p.qty - it.qty).toFixed(3);
-        restoreBuyPrice(it.productId, it.prevBuy, it.prevEst, pu.date, warn);
-      });
-      pu.reversed = true;
-      purchases.push({ id: id(), supplierId: pu.supplierId, supplierName: pu.supplierName,
-        date: new Date().toISOString(), total: -pu.total, paid: -(pu.paid || 0),
-        remaining: -(pu.remaining || 0), reverseOf: pu.id,
-        items: (pu.items || []).map(function (it) {
-          return { productId: it.productId, productName: it.productName, qty: -it.qty, buyPrice: it.buyPrice };
-        }) });
-      save(LS_PUR, purchases); save(LS_P, products);
-      closeSheet();
-      renderPurchases(); renderSuppliers(); renderProducts(); renderSaleGrid();
-      toast("فاکتور باطل شد ✓");
-      voidWarnSheet(warn, function () {});
+      // اگر اجناس این فاکتور فروخته شده باشند، باطل‌کردن موجودی را منفی
+      // می‌کند — این باید گفته شود، نه خاموش انجام گیرد.
+      var wants = (pu.items || []).map(function (it) { return { productId: it.productId, qty: it.qty }; });
+      if (!guardStockOut(wants, "اجناس این فاکتور تا حال فروخته شده‌اند، پس باطل‌کردنش موجودی را منفی می‌کند:",
+        function () { doVoidPurchase(pu); },
+        function () { openPurchaseDetail(pu); })) return;
+      doVoidPurchase(pu);
     });
+  }
+
+  function doVoidPurchase(pu) {
+    var warn = [];
+    (pu.items || []).forEach(function (it) {
+      var p = findP(it.productId);
+      if (p) p.qty = +(p.qty - it.qty).toFixed(3);
+      restoreBuyPrice(it.productId, it.prevBuy, it.prevEst, pu, warn);
+    });
+    pu.reversed = true;
+    var now = new Date().toISOString();
+    purchases.push({ id: id(), supplierId: pu.supplierId, supplierName: pu.supplierName,
+      date: now, ts: now, total: -pu.total, paid: -(pu.paid || 0),
+      remaining: -(pu.remaining || 0), reverseOf: pu.id,
+      items: (pu.items || []).map(function (it) {
+        return { productId: it.productId, productName: it.productName, qty: -it.qty, buyPrice: it.buyPrice };
+      }) });
+    save(LS_PUR, purchases); save(LS_P, products);
+    closeSheet();
+    renderPurchases(); renderSuppliers(); renderProducts(); renderSaleGrid();
+    toast("فاکتور باطل شد ✓");
+    voidWarnSheet(warn, function () {});
   }
 
   // ---- ۲) رسید پرداخت به تامین‌کننده ----
@@ -835,7 +898,7 @@
       if (goods) {
         var p = findP(rec.productId);
         if (p) p.qty = +(p.qty - rec.qty).toFixed(3);
-        restoreBuyPrice(rec.productId, rec.prevBuy, rec.prevEst, rec.date, warn);
+        restoreBuyPrice(rec.productId, rec.prevBuy, rec.prevEst, rec, warn);
         save(LS_P, products);
       }
       rec.reversed = true;
@@ -880,9 +943,14 @@
       var p = findP(rec.productId);
       if (p) p.qty = +(p.qty + rec.quantity).toFixed(3);
       rec.reversed = true;
-      waste.push({ id: id(), date: new Date().toISOString(), productId: rec.productId,
+      // countMonth باید همراه بیاید: شمارش دوبارهٔ همان ماه، ضایعات کسریِ
+      // آن ماه را پاک می‌کند. اگر رکورد وارونه این نشان را نداشت، تنها
+      // می‌ماند و ضرر منفی → «فایدهٔ ساختگی» می‌ساخت.
+      var rev = { id: id(), date: new Date().toISOString(), productId: rec.productId,
         productName: rec.productName, unit: rec.unit, quantity: -rec.quantity,
-        buyPrice: rec.buyPrice, reason: rec.reason, reverseOf: rec.id });
+        buyPrice: rec.buyPrice, reason: rec.reason, reverseOf: rec.id };
+      if (rec.countMonth) rev.countMonth = rec.countMonth;
+      waste.push(rev);
       save(LS_WASTE, waste); save(LS_P, products);
       closeSheet(); renderMore(); renderProducts(); renderSaleGrid();
       toast("ضایعات باطل شد ✓");
@@ -1495,6 +1563,14 @@
     if (cart.length === 0) return;
     // فروش قرضی بدون نام اجازه ندارد — ورنه پول در دفتر قرض گم می‌شود
     if (type === "credit" && !(customerName || "").trim()) { toast("برای فروش قرض نام مشتری لازم است", true); return; }
+    // موجودی نباید خاموش منفی شود (تایپ ۵۰۰ به‌جای ۵۰)
+    if (!guardStockOut(cart.map(function (l) { return { productId: l.productId, qty: l.qty }; }),
+      "این فروش بیشتر از موجودی دوکان است:",
+      function () { commitSale(type, customerName); })) return;
+    commitSale(type, customerName);
+  }
+
+  function commitSale(type, customerName) {
     var items = cart.map(function (l) {
       var p = findP(l.productId);
       // اگر قیمت خرید تخمینی بود، در خود فروش نشانی می‌شود تا گزارش راست بگوید
@@ -1939,19 +2015,65 @@
         buyEstimated: $("#fEst").checked,
         star: !!p.star
       };
-      if (editing) {
-        for (var i = 0; i < products.length; i++) if (products[i].id === p.id) { products[i] = rec; break; }
-      } else products.push(rec);
-      if (photoData) photoSave(rec.id, photoData); else photoRemove(rec.id);
-      save(LS_P, products);
-      closeSheet(); renderProducts(); renderSaleGrid();
-      toast(editing ? "تغییرات ذخیره شد ✓" : "جنس ثبت شد ✓");
+      // تغییر دستی تعداد یک جنس موجود نباید بی‌رد باشد — ورنه ۴۵ دانه
+      // بدون هیچ نشانی گم می‌شد و کسری/دزدی همین‌جا پنهان می‌ماند.
+      var oldQty = editing ? (p.qty || 0) : 0;
+      var qtyDiff = editing ? +(rec.qty - oldQty).toFixed(3) : 0;
+      function commitProduct() {
+        if (editing) {
+          for (var i = 0; i < products.length; i++) if (products[i].id === p.id) { products[i] = rec; break; }
+          if (qtyDiff !== 0) recordStockAdjust(rec, oldQty, qtyDiff);
+        } else products.push(rec);
+        if (photoData) photoSave(rec.id, photoData); else photoRemove(rec.id);
+        save(LS_P, products);
+        closeSheet(); renderProducts(); renderSaleGrid();
+        toast(editing ? "تغییرات ذخیره شد ✓" : "جنس ثبت شد ✓");
+      }
+      if (qtyDiff !== 0) { confirmQtyChange(rec, oldQty, qtyDiff, commitProduct); return; }
+      commitProduct();
     });
 
     if (editing) {
       $("#fDelete").addEventListener("click", function () { confirmDelete(p); });
     }
     setTimeout(function () { if (!editing) $("#fName").focus(); }, 60);
+  }
+
+  // ---------- تغییر دستی تعداد جنس ----------
+  // مثل شمارش ماهانه رفتار می‌کند: کم‌شدن = ضرر واقعی (در ضایعات ثبت
+  // می‌شود تا از فایده کم گردد)، زیادشدن فقط رقم را درست می‌کند و
+  // فایدهٔ ساختگی نمی‌سازد. در هر دو حالت یک رکورد شمارش برای رد می‌ماند.
+  function confirmQtyChange(rec, oldQty, diff, run) {
+    var loss = diff < 0 ? +((-diff) * (rec.buy || 0)).toFixed(2) : 0;
+    openSheet(
+      '<h2>تعداد «' + esc(rec.name) + '» عوض می‌شود</h2>' +
+      '<div class="sumbox" style="margin-bottom:12px">' +
+        '<div class="sumrow"><span>تعداد فعلی</span><span class="num">' + qtyUnit(oldQty, rec.unit) + '</span></div>' +
+        '<div class="sumrow"><span>تعداد نو</span><span class="num">' + qtyUnit(rec.qty, rec.unit) + '</span></div>' +
+        '<div class="sumrow total"><span>' + (diff < 0 ? "کسری" : "زیادت") + '</span>' +
+          '<span class="num" style="color:' + (diff < 0 ? "var(--danger)" : "var(--primary)") + '">' +
+          qtyUnit(Math.abs(diff), rec.unit) + '</span></div>' +
+      '</div>' +
+      '<p style="font-size:13.5px;line-height:1.95;color:var(--ink-soft);margin:0 0 12px">' +
+        (diff < 0
+          ? 'کسری ضرر واقعی است، پس <b style="color:var(--danger)">' + money(loss) + '</b> در ضایعات ثبت می‌شود و از فایده کم می‌گردد.'
+          : 'زیادت فقط رقم موجودی را درست می‌کند و فایدهٔ ساختگی نمی‌سازد.') +
+        '<br>در هر حال یک رکورد در «شمارش» می‌ماند تا رد این تغییر معلوم باشد.</p>' +
+      '<div class="actions"><button class="ghost" data-close>نی، لغو</button>' +
+        '<button class="primary" id="qcOk">بلی، ثبت کن</button></div>'
+    );
+    $("#qcOk").addEventListener("click", run);
+  }
+  function recordStockAdjust(rec, oldQty, diff) {
+    var now = new Date().toISOString();
+    stockCounts.push({ id: id(), month: monthKey(), productId: rec.id, productName: rec.name,
+      unit: rec.unit, calculated: oldQty, counted: rec.qty, difference: diff,
+      date: now, manual: true });
+    if (diff < 0) {
+      waste.push({ id: id(), productId: rec.id, productName: rec.name, unit: rec.unit,
+        quantity: -diff, buyPrice: rec.buy || 0, date: now, reason: "shortage" });
+    }
+    save(LS_COUNTS, stockCounts); save(LS_WASTE, waste);
   }
 
   function confirmDelete(p) {
@@ -2345,6 +2467,8 @@
 
     purchases.push({
       id: id(), supplierId: sup.id, supplierName: sup.name, date: draft.date || todayISO(),
+      // ts = لحظهٔ ثبت. date را کاربر انتخاب می‌کند و فقط «روز» دارد.
+      ts: new Date().toISOString(),
       total: total, paid: paid, remaining: remaining,
       items: validLines.map(function (l) {
         return { productId: l.productId, productName: l.name, qty: l.qty, buyPrice: l.buyPrice,
@@ -2686,8 +2810,12 @@
       if (!v) { toast("مقدار و نرخ را درست بنویسید", true); return; }
       var p = findP(picked.id);
       if (!p) { toast("جنس پیدا نشد", true); return; }
-      if (v.qty > p.qty) toast("اخطار: موجودی «" + p.name + "» کمتر از این مقدار است", true);
-
+      if (!guardStockOut([{ productId: p.id, qty: v.qty }],
+        "این فروش بازار بیشتر از موجودی دوکان است:",
+        function () { doBazaarSale(p, v); }, draw)) return;
+      doBazaarSale(p, v);
+    }
+    function doBazaarSale(p, v) {
       // همان ساختار فروش عادی — نرخ فروش و قیمت خرید لحظهٔ فروش عکس گرفته
       // می‌شوند، تا تغییر بعدی نرخ‌ها فایدهٔ این فروش را خراب نکند.
       sales.push({ id: id(), date: new Date().toISOString(), total: v.total,
@@ -2846,6 +2974,7 @@
       p.qty = +(p.qty + v.qty).toFixed(3);
 
       custPayments.push({ id: id(), customerId: c.id, date: new Date().toISOString(),
+        ts: new Date().toISOString(),
         amount: v.value, kind: "goods", productId: p.id, productName: p.name,
         unit: p.unit, qty: v.qty, unitPrice: v.price,
         // عکس قیمت خرید پیش از این رسید — برای باطل‌کردن

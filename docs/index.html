@@ -971,6 +971,14 @@
   // جدا شود، ورنه پول ساختگی در صندوق نشان داده می‌شد.
   function isGoodsPay(p) { return !!p && p.kind === "goods"; }
 
+  // «مصرف خانه به جنس»: جنس از گدام برای خانه برداشته می‌شود.
+  // موجودی کم می‌شود و ارزشش مصرف خانه است، ولی **صندوق دست نمی‌خورد** —
+  // پولی از جعبه نرفته. ارزشش به **قیمت خرید** حساب می‌شود، نه فروش:
+  // چیزی فروخته نشده، پس فایده‌ای هم نبوده؛ آنچه از دوکان رفته همان است
+  // که برایش پول داده‌اید. اگر به نرخ فروش حساب می‌شد، مصرف خانه بزرگ‌تر
+  // از واقعیت و فایده کوچک‌تر از واقعیت نشان داده می‌شد.
+  function isGoodsExpense(e) { return !!e && e.kind === "goods"; }
+
   function debtMaps() {
     if (_debtCache) return _debtCache;
     var c = {}, s = {};
@@ -1043,7 +1051,7 @@
     custPayments.forEach(function (p) { if (!isGoodsPay(p)) b.custPaid += p.amount; });
     purchases.forEach(function (p) { b.purchasePaid += (p.paid || 0); });
     supPayments.forEach(function (p) { b.supPaid += p.amount; });
-    expenses.forEach(function (e) { b.expenses += e.amount; });
+    expenses.forEach(function (e) { if (!isGoodsExpense(e)) b.expenses += e.amount; });
     cashEntries.forEach(function (e) {
       if (e.kind === "in") b.manualIn += e.amount;
       else if (e.kind === "out") b.manualOut += e.amount;
@@ -3191,7 +3199,7 @@
   function computeReport(period) {
     var start = periodStart(period);
     var r = { totalSales: 0, cash: 0, credit: 0, cogs: 0, wasteLoss: 0, expenses: 0, profit: 0, netProfit: 0,
-              cashIn: 0, cashOut: 0, cashBox: 0, cashShort: 0, estCogs: 0, estNames: {}, perProduct: {},
+              cashIn: 0, cashOut: 0, cashBox: 0, cashShort: 0, expensesGoods: 0, estCogs: 0, estNames: {}, perProduct: {},
               // فروش دوکان و فروش بازار جدا — تا معلوم شود کدام یکی چقدر می‌دهد.
               // فایدهٔ اینجا پیش از ضایعات و کسری صندوق است (آن‌ها به کانال بند نیستند).
               shopSales: 0, bazaarSales: 0, shopProfit: 0, bazaarProfit: 0 };
@@ -3217,7 +3225,12 @@
       });
     });
     waste.forEach(function (w) { if (new Date(w.date) >= start) r.wasteLoss += w.quantity * w.buyPrice; });
-    expenses.forEach(function (x) { if (new Date(x.date) >= start) r.expenses += x.amount; });
+    expenses.forEach(function (x) {
+      if (new Date(x.date) < start) return;
+      r.expenses += x.amount;
+      // مصرف «به جنس» پول نقد نیست؛ در صندوق نمی‌آید ولی مصرف خانه هست
+      if (isGoodsExpense(x)) r.expensesGoods += x.amount;
+    });
     r.profit = r.totalSales - r.cogs - r.wasteLoss;
     r.netProfit = r.profit - r.expenses;
 
@@ -3227,7 +3240,7 @@
     custPayments.forEach(function (x) { if (!isGoodsPay(x) && new Date(x.date) >= start) r.cashIn += x.amount; });
     purchases.forEach(function (pu) { if (new Date(pu.date) >= start) r.cashOut += (pu.paid || 0); });
     supPayments.forEach(function (x) { if (new Date(x.date) >= start) r.cashOut += x.amount; });
-    r.cashOut += r.expenses;
+    r.cashOut += +(r.expenses - r.expensesGoods).toFixed(2); // فقط مصارف نقدی
     // رویدادهای خود صندوق: موجودی اول، پول دستی، و تعدیل شمارش
     cashEntries.forEach(function (e) {
       if (new Date(e.date) < start) return;
@@ -3318,6 +3331,8 @@
         '</div>' +
         '<div class="sumbox">' +
           row("مصارف خانه", r.expenses) +
+          // برداشت جنس از گدام هم مصرف خانه است، ولی از صندوق پول نبرده
+          (r.expensesGoods ? '<div class="sumrow"><span style="padding-inline-start:14px;color:var(--ink-soft);font-size:13.5px">از آن، جنس از گدام (به قیمت خرید)</span><span class="num" style="color:var(--ink-soft)">' + money(r.expensesGoods) + '</span></div>' : '') +
           '<div class="sumrow total"><span>فایدهٔ نهایی (بعد از مصارف خانه)</span><span class="num" style="color:' + (r.netProfit >= 0 ? "var(--primary)" : "var(--danger)") + '">' + money(r.netProfit) + '</span></div>' +
         '</div>' +
         '<div class="sumbox">' +
@@ -3819,6 +3834,7 @@
       out.push({ date: p.date, amount: -p.amount, label: "پرداخت به " + (s ? s.name : "تامین‌کننده") });
     });
     expenses.forEach(function (e) {
+      if (isGoodsExpense(e)) return; // جنس از گدام رفت، نه پول از صندوق
       out.push({ date: e.date, amount: -e.amount, label: "مصرف خانه" + (e.note ? " — " + e.note : "") });
     });
     cashEntries.forEach(function (e) {
@@ -4251,8 +4267,8 @@
   }
 
   function renderExpenses(el) {
-    var total = 0;
-    expenses.forEach(function (x) { total += x.amount; });
+    var total = 0, goodsTotal = 0;
+    expenses.forEach(function (x) { total += x.amount; if (isGoodsExpense(x)) goodsTotal += x.amount; });
     var sorted = expenses.slice().sort(function (a, b) { return (b.date || "").localeCompare(a.date || ""); });
     var listHtml = sorted.length === 0
       ? '<p style="color:var(--ink-soft);text-align:center;padding:10px;font-size:14px">هنوز مصرفی ثبت نشده</p>'
@@ -4263,6 +4279,18 @@
               '<div class="in"><b><span class="reason-badge">اصلاحیه</span> ' + esc(x.note || "") + '</b><small class="num">' + fmtDate(x.date) + '</small></div>' +
               '<div class="lt num" style="color:var(--danger)">' + sign + money(x.amount) + '</div></div>';
           }
+          // مصرف «به جنس» اصلاحیهٔ مبلغی ندارد (مقدار جنس است)، پس باطل می‌شود
+          if (isGoodsExpense(x)) {
+            var tag = x.reverseOf ? ' <span class="retbadge">باطل‌کردن</span>'
+                    : (x.reversed ? ' <span class="retbadge">باطل شد</span>' : '');
+            var vb = isVoided(x) ? '' :
+              '<button class="wbtn" data-voidx="' + x.id + '" style="background:var(--danger)">باطل</button>';
+            return '<div class="iline">' + vb +
+              '<div class="in"><b><span class="estbadge">به جنس</span> ' + esc(x.note || "برداشت") + tag + '</b>' +
+              '<small class="num">' + fmtDate(x.date) + ' • ' + nf.format(x.qty) + ' ' + unitLabel(x.unit) +
+                ' × ' + money(x.unitPrice) + '</small></div>' +
+              '<div class="lt num" style="color:var(--credit)">' + money(x.amount) + '</div></div>';
+          }
           return '<div class="iline">' +
             '<button class="wbtn" data-correct="' + x.id + '" style="background:var(--credit)">اصلاح</button>' +
             '<div class="in"><b>' + esc(x.note || "مصرف") + '</b><small class="num">' + fmtDate(x.date) + '</small></div>' +
@@ -4271,9 +4299,133 @@
 
     el.innerHTML =
       '<div class="subhead"><button class="back moreBack" aria-label="بازگشت">→</button><h3>مصارف خانه</h3></div>' +
-      '<div style="padding:10px 14px 4px"><button class="addline" id="newExpenseBtn" style="margin:0;border-color:var(--primary);background:var(--primary-soft);color:var(--primary)">＋ ثبت مصرف جدید</button></div>' +
-      '<div class="listhead">مصارف ثبت‌شده — مجموع: <span style="color:var(--credit)" class="num">' + money(total) + '</span></div>' +
+      '<div style="padding:10px 14px 0"><button class="addline" id="newExpenseBtn" style="margin:0;border-color:var(--primary);background:var(--primary-soft);color:var(--primary)">＋ ثبت مصرف نقدی</button></div>' +
+      '<div style="padding:8px 14px 4px"><button class="addline" id="newExpGoodsBtn" style="margin:0;border-color:var(--credit);background:var(--credit-soft);color:var(--credit)">🏠 برداشتن جنس از گدام برای خانه</button></div>' +
+      '<div class="listhead">مصارف ثبت‌شده — مجموع: <span style="color:var(--credit)" class="num">' + money(total) + '</span>' +
+        (goodsTotal ? ' <span style="font-weight:700;color:var(--ink-soft)">(از آن به جنس: <span class="num">' + money(goodsTotal) + '</span>)</span>' : '') + '</div>' +
       listHtml;
+  }
+
+  // ---------- مصرف خانه به جنس (برداشتن جنس از گدام) ----------
+  function openExpenseGoods() {
+    var picked = null, keptQty = "";
+    function draw() {
+      openSheet(
+        '<h2>🏠 برداشتن جنس برای خانه</h2>' +
+        '<p style="margin:-6px 0 12px;color:var(--ink-soft);font-size:13.5px;line-height:1.9">' +
+          'جنسی که از گدام برای خانه می‌برید. <b>موجودی کم می‌شود</b> و ارزشش در مصارف خانه ' +
+          'می‌آید، ولی <b>صندوق دست نمی‌خورد</b> — پولی از جعبه نرفته.</p>' +
+        '<div class="field"><label>جنس</label>' +
+          '<button type="button" class="addline" id="xPick" style="margin:0;text-align:center">' +
+            (picked ? esc(picked.name) + ' — تبدیل' : '＋ انتخاب جنس') + '</button>' +
+          '<div class="err" id="eXProd">جنس را انتخاب کنید</div></div>' +
+        (picked ?
+        '<div class="field"><label>مقدار (' + unitLabel(picked.unit) + ') — موجود: ' + qtyUnit(picked.qty, picked.unit) + '</label>' +
+          '<input id="xQty" type="number" inputmode="decimal" step="any" min="0" value="' + esc(keptQty) + '" placeholder="0" /></div>' +
+        '<div class="sumbox" id="xOut" style="margin-bottom:12px"></div>' : '') +
+        '<div class="field"><label>توضیح (اختیاری)</label>' +
+          '<input id="xNote" type="text" placeholder="مثلاً: برای خانه" /></div>' +
+        '<div class="actions"><button class="ghost" data-close>لغو</button>' +
+          '<button class="primary" id="xOk">ثبت</button></div>'
+      );
+      $("#xPick").addEventListener("click", openXPicker);
+      if (picked) {
+        $("#xQty").addEventListener("input", refresh);
+        refresh();
+        setTimeout(function () { $("#xQty").focus(); }, 60);
+      }
+      $("#xOk").addEventListener("click", commit);
+    }
+    function vals() {
+      if (!picked) return null;
+      var q = parseFloat($("#xQty").value);
+      if (!(q > 0)) return null;
+      return { qty: q, cost: +(q * (picked.buy || 0)).toFixed(2), retail: +(q * (picked.sell || 0)).toFixed(2) };
+    }
+    function refresh() {
+      var v = vals(), out = $("#xOut");
+      if (!v) { out.innerHTML = '<div class="sumrow"><span>ارزش</span><span class="num">—</span></div>'; return; }
+      out.innerHTML =
+        '<div class="sumrow total"><span>مصرف خانه (به قیمت خرید)</span><span class="num" style="color:var(--credit)">' + money(v.cost) + '</span></div>' +
+        '<div class="sumrow"><span>به نرخ فروش می‌شد</span><span class="num">' + money(v.retail) + '</span></div>' +
+        '<p style="font-size:12.5px;color:var(--ink-soft);line-height:1.8;margin:8px 0 0">' +
+          'به <b>قیمت خرید</b> حساب می‌شود، چون چیزی فروخته نشده و فایده‌ای نبوده. ' +
+          'همان‌قدر از دوکان رفته که برایش پول داده‌اید.</p>';
+    }
+    function openXPicker() {
+      var list = products.slice().sort(function (a, b) {
+        var oa = a.qty > 0 ? 0 : 1, ob = b.qty > 0 ? 0 : 1;
+        if (oa !== ob) return oa - ob;
+        return a.name.localeCompare(b.name, "fa");
+      });
+      openSheet(
+        '<h2>کدام جنس؟</h2>' +
+        (list.length === 0 ? '<p style="color:var(--ink-soft);text-align:center;padding:8px">هنوز جنسی نیست</p>' :
+        list.map(function (p) {
+          return '<div class="iline" data-xp="' + p.id + '" role="button" tabindex="0" style="cursor:pointer">' +
+            '<div class="in"><b>' + esc(p.name) + '</b><small class="num">موجود: ' + qtyUnit(p.qty, p.unit) +
+              ' • خرید: ' + money(p.buy || 0) + '</small></div></div>';
+        }).join("")) +
+        '<div class="actions"><button class="ghost" id="xBack">بازگشت</button></div>'
+      );
+      $("#xBack").addEventListener("click", draw);
+      sheet.querySelectorAll("[data-xp]").forEach(function (el) {
+        el.addEventListener("click", function () {
+          var p = findP(el.dataset.xp);
+          picked = { id: p.id, name: p.name, unit: p.unit, qty: p.qty, buy: p.buy || 0, sell: p.sell || 0 };
+          keptQty = "";
+          draw();
+        });
+      });
+    }
+    function commit() {
+      if (!picked) { $("#eXProd").classList.add("show"); return; }
+      var v = vals();
+      if (!v) { toast("مقدار را درست بنویسید", true); return; }
+      var p = findP(picked.id);
+      if (!p) { toast("جنس پیدا نشد", true); return; }
+      var note = $("#xNote").value.trim();
+      keptQty = $("#xQty").value;
+      if (!guardStockOut([{ productId: p.id, qty: v.qty }],
+        "این مقدار بیشتر از موجودی گدام است:",
+        function () { doExpenseGoods(p, v, note); }, draw)) return;
+      doExpenseGoods(p, v, note);
+    }
+    function doExpenseGoods(p, v, note) {
+      // قیمت خرید لحظهٔ برداشتن عکس گرفته می‌شود، تا تغییر بعدی نرخ‌ها
+      // این رکورد را عوض نکند.
+      expenses.push({ id: id(), date: new Date().toISOString(), amount: v.cost,
+        note: note || ("برداشت " + p.name), kind: "goods",
+        productId: p.id, productName: p.name, unit: p.unit,
+        qty: v.qty, unitPrice: p.buy || 0 });
+      p.qty = +(p.qty - v.qty).toFixed(3);
+      save(LS_EXP, expenses); save(LS_P, products);
+      closeSheet(); renderMore(); renderProducts(); renderSaleGrid();
+      buzz(30);
+      toast("برداشت ثبت شد ✓ موجودی کم شد");
+    }
+    draw();
+  }
+
+  // باطل‌کردن برداشت جنس — موجودی و مصرف خانه پس می‌آیند
+  function voidGoodsExpense(rec) {
+    if (isVoided(rec)) return;
+    confirmVoid("باطل‌کردن برداشت جنس", [
+      ["موجودی " + (rec.productName || "جنس"), "＋ " + nf.format(rec.qty)],
+      ["مصارف خانه", "− " + money(rec.amount)],
+      ["صندوق", "دست‌نخورده"]
+    ], function () {
+      var p = findP(rec.productId);
+      if (p) p.qty = +(p.qty + rec.qty).toFixed(3);
+      rec.reversed = true;
+      expenses.push({ id: id(), date: new Date().toISOString(), amount: -rec.amount,
+        note: "باطل‌کردن: " + (rec.note || ""), kind: "goods", reverseOf: rec.id,
+        productId: rec.productId, productName: rec.productName, unit: rec.unit,
+        qty: -rec.qty, unitPrice: rec.unitPrice });
+      save(LS_EXP, expenses); save(LS_P, products);
+      closeSheet(); renderMore(); renderProducts(); renderSaleGrid();
+      toast("برداشت باطل شد ✓");
+    });
   }
 
   function openExpenseForm() {
@@ -4529,6 +4681,7 @@
     if (e.target.closest("#newWasteBtn")) { openWastePicker(); return; }
     if (e.target.closest("#groupPriceBtn")) { openGroupPrice(); return; }
     if (e.target.closest("#bzNew")) { openBazaarSale(); return; }
+    if (e.target.closest("#newExpGoodsBtn")) { openExpenseGoods(); return; }
     if (e.target.closest("#cashCountBtn")) { openCashCount(); return; }
     if (e.target.closest("#cashInBtn")) { openCashEntry("in"); return; }
     if (e.target.closest("#cashOutBtn")) { openCashEntry("out"); return; }
@@ -4592,6 +4745,7 @@
     if ((r = pick(supPayments, "data-voidsp"))) { voidSupPayment(r); return; }
     if ((r = pick(cashEntries, "data-voidce"))) { voidCashEntry(r); return; }
     if ((r = pick(waste, "data-voidw"))) { voidWaste(r); return; }
+    if ((r = pick(expenses, "data-voidx"))) { voidGoodsExpense(r); return; }
   });
   document.addEventListener("keydown", function (e) { if (e.key === "Escape" && overlay.classList.contains("open")) closeSheet(); });
 

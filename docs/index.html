@@ -579,6 +579,14 @@
         <button type="button" data-d="customers" class="on">👤 مشتری‌ها</button>
         <button type="button" data-d="suppliers">🤝 تامین‌کننده‌ها</button>
       </div>
+      <!-- جستجو: بیرون از فهرست است تا با هر رسم دوباره، انگشت از خانه نپرد -->
+      <div class="searchwrap" id="debtSearchBar" style="display:none;padding:10px 14px 2px">
+        <div class="search">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+          <input id="debtSearch" type="text" inputmode="search" placeholder="جستجوی نام..." autocomplete="off" />
+          <button class="clr" id="debtSearchClr" style="display:none" aria-label="پاک">×</button>
+        </div>
+      </div>
       <div class="listwrap" id="customerList"></div>
       <div class="listwrap" id="supplierList" style="display:none"></div>
     </section>
@@ -2025,6 +2033,7 @@
           if (qtyDiff !== 0) recordStockAdjust(rec, oldQty, qtyDiff);
         } else products.push(rec);
         if (photoData) photoSave(rec.id, photoData); else photoRemove(rec.id);
+        if (typeof syncPhotosOnChange === "function") syncPhotosOnChange();
         save(LS_P, products);
         closeSheet(); renderProducts(); renderSaleGrid();
         toast(editing ? "تغییرات ذخیره شد ✓" : "جنس ثبت شد ✓");
@@ -2087,6 +2096,7 @@
       products = products.filter(function (x) { return x.id !== p.id; });
       cart = cart.filter(function (l) { return l.productId !== p.id; });
       photoRemove(p.id);
+      if (typeof syncPhotosOnChange === "function") syncPhotosOnChange();
       save(LS_P, products);
       closeSheet(); renderProducts(); renderSaleGrid(); renderCart();
       toast("«" + p.name + "» حذف شد");
@@ -2492,7 +2502,11 @@
       el.innerHTML = addBtn + '<div class="empty"><div class="big">🤝</div><p>هنوز تامین‌کننده‌ای نیست.<br>با فاکتور خرید یا دکمهٔ بالا اضافه کنید.</p></div>';
       return;
     }
-    var sorted = suppliers.slice().sort(function (a, b) { return supDebt(b) - supDebt(a); });
+    var sorted = suppliers.filter(debtMatch).sort(function (a, b) { return supDebt(b) - supDebt(a); });
+    if (sorted.length === 0) {
+      el.innerHTML = addBtn + '<div class="empty"><div class="big">🔍</div><p>تامین‌کننده‌ای با این نام پیدا نشد</p></div>';
+      return;
+    }
     el.innerHTML = addBtn + sorted.map(function (s) {
       var d = supDebt(s);
       var low = d > 0;
@@ -2602,7 +2616,11 @@
       el.innerHTML = addBtn + '<div class="empty"><div class="big">👤</div><p>هنوز مشتری قرضداری نیست.<br>با فروش «قرض» یا دکمهٔ بالا اضافه کنید.</p></div>';
       return;
     }
-    var sorted = customers.slice().sort(function (a, b) { return custDebt(b) - custDebt(a); });
+    var sorted = customers.filter(debtMatch).sort(function (a, b) { return custDebt(b) - custDebt(a); });
+    if (sorted.length === 0) {
+      el.innerHTML = addBtn + '<div class="empty"><div class="big">🔍</div><p>مشتری‌ای با این نام پیدا نشد</p></div>';
+      return;
+    }
     el.innerHTML = addBtn + sorted.map(function (c) {
       var d = custDebt(c);
       var low = d > 0;
@@ -2732,8 +2750,9 @@
   }
 
   function openBazaarSale() {
-    var picked = null;
+    var picked = null, payType = "cash", custName = "";
     function draw() {
+      var recents = recentCustomers(6);
       openSheet(
         '<h2>🏪 فروش بازار</h2>' +
         '<div class="field"><label>جنس</label>' +
@@ -2742,22 +2761,59 @@
           '<div class="err" id="eBProd">جنس را انتخاب کنید</div></div>' +
         (picked ?
         '<div class="field"><label>مقدار (' + unitLabel(picked.unit) + ') — موجود: ' + qtyUnit(picked.qty, picked.unit) + '</label>' +
-          '<input id="bQty" type="number" inputmode="decimal" step="any" min="0" placeholder="0" /></div>' +
+          '<input id="bQty" type="number" inputmode="decimal" step="any" min="0" value="' + esc(kept.qty) + '" placeholder="0" /></div>' +
         '<div class="field"><label>نرخ فروش بازار فی ' + unitLabel(picked.unit) + ' (افغانی)</label>' +
-          '<input id="bPrice" type="number" inputmode="decimal" step="any" min="0" value="' + (picked.sell || "") + '" />' +
+          '<input id="bPrice" type="number" inputmode="decimal" step="any" min="0" value="' + esc(kept.price !== "" ? kept.price : (picked.sell || "")) + '" />' +
           '<small style="display:block;margin-top:6px;color:var(--ink-soft);font-size:12.5px">نرخ بازار هر روز فرق می‌کند — نرخ همین معامله را بنویسید.</small></div>' +
+        // در بازار هم گاهی قرضی فروخته می‌شود
+        '<div class="field"><label>پرداخت</label>' +
+          '<div class="seg" id="bPay">' +
+            '<button type="button" data-b="cash" class="' + (payType === "cash" ? "on" : "") + '">💵 نقد</button>' +
+            '<button type="button" data-b="credit" class="' + (payType === "credit" ? "on" : "") + '">◔ قرض</button>' +
+          '</div></div>' +
+        (payType === "credit" ?
+          '<div class="field"><label>نام خریدار (حتمی)</label>' +
+            '<input id="bCust" type="text" value="' + esc(custName) + '" placeholder="مثلاً: کریم" />' +
+            '<div class="err" id="eBCust">نام خریدار را بنویسید — ورنه قرض در دفتر ثبت نمی‌شود</div>' +
+            (recents.length ? '<div class="chips" id="bRecents" style="flex-wrap:wrap;margin-top:8px">' +
+              recents.map(function (c) {
+                return '<button type="button" data-bc="' + esc(c.name) + '" style="flex:0 1 auto;padding:8px 12px">' + esc(c.name) + '</button>';
+              }).join("") + '</div>' : '') +
+          '</div>' : '') +
         '<div class="sumbox" id="bOut" style="margin-bottom:12px"></div>' : '') +
         '<div class="actions"><button class="ghost" data-close>لغو</button>' +
-          '<button class="primary" id="bOk">💵 ثبت فروش نقد</button></div>'
+          '<button class="primary" id="bOk">' + (payType === "credit" ? "◔ ثبت فروش قرض" : "💵 ثبت فروش نقد") + '</button></div>'
       );
       $("#bPick").addEventListener("click", openBazaarPicker);
       if (picked) {
         $("#bQty").addEventListener("input", refresh);
         $("#bPrice").addEventListener("input", refresh);
+        sheet.querySelectorAll("#bPay button").forEach(function (b) {
+          b.addEventListener("click", function () {
+            syncBazaarInputs();
+            payType = b.dataset.b;
+            draw();
+          });
+        });
+        if ($("#bRecents")) {
+          $("#bRecents").addEventListener("click", function (e) {
+            var b = e.target.closest("[data-bc]"); if (!b) return;
+            $("#bCust").value = b.dataset.bc;
+            $("#eBCust").classList.remove("show");
+            buzz();
+          });
+        }
         refresh();
         setTimeout(function () { $("#bQty").focus(); }, 60);
       }
       $("#bOk").addEventListener("click", commit);
+    }
+    // پیش از رسم دوباره، آنچه تایپ شده نگه داشته شود
+    var kept = { qty: "", price: "" };
+    function syncBazaarInputs() {
+      if ($("#bQty")) kept.qty = $("#bQty").value;
+      if ($("#bPrice")) kept.price = $("#bPrice").value;
+      if ($("#bCust")) custName = $("#bCust").value;
     }
     function vals() {
       if (!picked) return null;
@@ -2800,6 +2856,7 @@
         el.addEventListener("click", function () {
           var p = findP(el.dataset.bp);
           picked = { id: p.id, name: p.name, unit: p.unit, qty: p.qty, buy: p.buy || 0, sell: p.sell };
+          kept.qty = ""; kept.price = ""; // نرخ پیش‌فرض جنس نو بیاید
           draw();
         });
       });
@@ -2810,6 +2867,12 @@
       if (!v) { toast("مقدار و نرخ را درست بنویسید", true); return; }
       var p = findP(picked.id);
       if (!p) { toast("جنس پیدا نشد", true); return; }
+      // فروش قرضی بازار هم بدون نام اجازه ندارد — ورنه قرض در دفتر گم می‌شود
+      if (payType === "credit") {
+        custName = ($("#bCust") ? $("#bCust").value : "").trim();
+        if (!custName) { $("#eBCust").classList.add("show"); return; }
+      }
+      syncBazaarInputs();
       if (!guardStockOut([{ productId: p.id, qty: v.qty }],
         "این فروش بازار بیشتر از موجودی دوکان است:",
         function () { doBazaarSale(p, v); }, draw)) return;
@@ -2818,16 +2881,27 @@
     function doBazaarSale(p, v) {
       // همان ساختار فروش عادی — نرخ فروش و قیمت خرید لحظهٔ فروش عکس گرفته
       // می‌شوند، تا تغییر بعدی نرخ‌ها فایدهٔ این فروش را خراب نکند.
+      var custId = null, nm = null;
+      if (payType === "credit") {
+        nm = custName.trim();
+        var cust = null;
+        for (var i = 0; i < customers.length; i++) {
+          if (customers[i].name.trim().toLowerCase() === nm.toLowerCase()) { cust = customers[i]; break; }
+        }
+        if (!cust) { cust = { id: id(), name: nm, phone: "", opening: 0 }; customers.push(cust); }
+        custId = cust.id;
+        save(LS_CUST, customers);
+      }
       sales.push({ id: id(), date: new Date().toISOString(), total: v.total,
-        paymentType: "cash", customerName: null, customerId: null, channel: "bazaar",
+        paymentType: payType, customerName: nm, customerId: custId, channel: "bazaar",
         items: [{ productId: p.id, productName: p.name, quantity: v.qty,
                   sellPrice: v.price, buyPrice: p.buy || 0, buyEst: !!p.buyEstimated }] });
       p.qty = +(p.qty - v.qty).toFixed(3);
       save(LS_S, sales); save(LS_P, products);
       closeSheet();
-      renderSaleGrid(); renderProducts(); renderMore();
+      renderSaleGrid(); renderProducts(); renderCustomers(); renderMore();
       buzz(30);
-      toast("فروش بازار ثبت شد ✓ پول در صندوق آمد");
+      toast(payType === "credit" ? "فروش بازار قرضی ثبت شد ✓" : "فروش بازار ثبت شد ✓ پول در صندوق آمد");
     }
     draw();
   }
@@ -3018,9 +3092,20 @@
 
   // ---------- Debts hub (مشتری / تامین‌کننده) ----------
   var debtView = "customers";
+  // جستجوی نام در دفتر قرض — وقتی مشتریان قرضی زیاد شوند، در شلوغی
+  // گشتن در فهرست وقت می‌گیرد.
+  var debtQuery = "";
+  function debtMatch(x) {
+    if (!debtQuery) return true;
+    return String(x.name || "").toLowerCase().indexOf(debtQuery) !== -1;
+  }
   function renderDebts() {
     $("#customerList").style.display = debtView === "customers" ? "block" : "none";
     $("#supplierList").style.display = debtView === "suppliers" ? "block" : "none";
+    // نوار جستجو فقط وقتی می‌آید که فهرست به‌اندازهٔ کافی دراز باشد
+    var many = (debtView === "customers" ? customers.length : suppliers.length) >= 8;
+    $("#debtSearchBar").style.display = many ? "flex" : "none";
+    if (!many && debtQuery) { debtQuery = ""; $("#debtSearch").value = ""; $("#debtSearchClr").style.display = "none"; }
     if (debtView === "customers") renderCustomers(); else renderSuppliers();
   }
 
@@ -3251,7 +3336,8 @@
 
   // ---------- Online sync (Supabase) ----------
   var READONLY = false;
-  var SYNC = { clientId: null, pushTimer: null, pollTimer: null, status: "خاموش", lastTs: 0, busy: false };
+  var SYNC = { clientId: null, pushTimer: null, pollTimer: null, status: "خاموش", lastTs: 0, busy: false,
+               photoTs: 0, photoTimer: null };
 
   function syncCfg() {
     return {
@@ -3327,12 +3413,63 @@
     SYNC.pushTimer = setTimeout(function () { syncPushNow(); }, 1500);
   }
 
+  // ---------- سنک عکس‌ها (جدا از دیتای مالی) ----------
+  // عکس‌ها در یک سند جداگانه می‌روند (کد دوکان + «__photos»). دلیلش:
+  // سند اصلی با هر فروش فرستاده می‌شود؛ اگر عکس‌ها هم داخلش بودند، هر
+  // فروش یک مگابایت اینترنت می‌خورد. عکس‌ها فقط وقتی می‌روند که عوض شوند.
+  function photosShop(cfg) { return cfg.shop + "__photos"; }
+  function syncPushPhotos() {
+    var cfg = syncCfg();
+    if (!cfg.enabled || cfg.role !== "owner" || READONLY || !cfg.url || !cfg.key || !cfg.shop) return Promise.resolve();
+    var ts = Date.now();
+    var body = [{ shop: photosShop(cfg), payload: { photos: photoCache }, ts: ts, by: SYNC.clientId }];
+    return fetch(sbUrl(cfg, "?on_conflict=shop"), {
+      method: "POST",
+      headers: Object.assign({ "Prefer": "resolution=merge-duplicates,return=minimal" }, sbHeaders(cfg)),
+      body: JSON.stringify(body)
+    }).then(function (r) {
+      if (r.ok) SYNC.photoTs = ts;
+    }).catch(function () {});
+  }
+  function syncPhotosOnChange() {
+    clearTimeout(SYNC.photoTimer);
+    SYNC.photoTimer = setTimeout(function () { syncPushPhotos(); }, 3000);
+  }
+  // فقط ts خوانده می‌شود (سبک)؛ اگر تازه‌تر بود، آن‌وقت خود عکس‌ها گرفته می‌شوند
+  function syncPullPhotos(force) {
+    var cfg = syncCfg();
+    if (!cfg.enabled || !cfg.url || !cfg.key || !cfg.shop) return Promise.resolve();
+    var key = encodeURIComponent(photosShop(cfg));
+    return fetch(sbUrl(cfg, "?shop=eq." + key + "&select=ts,by"), { headers: sbHeaders(cfg) })
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (rows) {
+        var row = (rows && rows.length) ? rows[0] : null;
+        if (!row) return null;
+        if (!force && !(row.ts > (SYNC.photoTs || 0) && row.by !== SYNC.clientId)) return null;
+        return fetch(sbUrl(cfg, "?shop=eq." + key + "&select=payload,ts"), { headers: sbHeaders(cfg) })
+          .then(function (r) { return r.ok ? r.json() : []; })
+          .then(function (rs) { return (rs && rs.length) ? rs[0] : null; });
+      })
+      .then(function (row) {
+        if (!row || !row.payload || !row.payload.photos) return;
+        var ph = row.payload.photos;
+        SYNC.photoTs = row.ts || Date.now();
+        return photoClear().then(function () {
+          var chain = Promise.resolve();
+          Object.keys(ph).forEach(function (k) { chain = chain.then(function () { return photoSave(k, ph[k]); }); });
+          return chain;
+        }).then(function () { renderSaleGrid(); renderProducts(); });
+      })
+      .catch(function () {});
+  }
+
   // چک دوره‌ای برای معلومات جدید (برادر زنده، و مالک از دستگاه دیگر)
   function syncPoll() {
     if (SYNC.busy) return;
     SYNC.busy = true;
     syncPull().then(function (row) {
       SYNC.busy = false;
+      syncPullPhotos(false); // عکس‌ها سند جدا دارند و مستقل چک می‌شوند
       if (!row) { setSyncStatus(READONLY ? "هنوز معلوماتی از دوکان نیامده" : "روشن — هنوز چیزی نفرستاده‌اید"); return; }
       if (row.ts && row.ts > SYNC.lastTs && row.by !== SYNC.clientId) {
         SYNC.lastTs = row.ts;
@@ -3351,6 +3488,7 @@
     localStorage.setItem("dukan.sync.enabled", "1");
     setSyncStatus("در حال وصل شدن...");
     if (SYNC.pollTimer) { clearInterval(SYNC.pollTimer); SYNC.pollTimer = null; }
+    syncPullPhotos(true); // یک‌بار عکس‌ها هم بیایند (برای تیلفون نو یا برادر)
     syncPull().then(function (row) {
       if (cfg.role === "viewer") {
         READONLY = true; document.body.classList.add("readonly");
@@ -3401,12 +3539,12 @@
           '۱) به <span style="direction:ltr">supabase.com</span> بروید و با GitHub وارد شوید → New project.<br>' +
           '۲) یک جدول با SQL بسازید (کد را برایتان می‌فرستم).<br>' +
           '۳) از Settings → API، «Project URL» و «anon public» key را کاپی و اینجا بچسپانید.<br>' +
-          '۴) نقش/کد دوکان را انتخاب، ذخیره و «روشن‌کردن سنک». در تلیفون برادر همان‌ها را با نقش «فقط دیدن» بگذارید.' +
+          '۴) نقش/کد دوکان را انتخاب، ذخیره و «روشن‌کردن سنک». در تلیفون برادر همان‌ها را با نقش «فقط دیدن» بگذارید.<br>' +
+          '<b>عکس‌ها</b> در یک سند جدا می‌روند و فقط وقتی فرستاده می‌شوند که عوض شوند — تا هر فروش اینترنت نخورد.' +
         '</div>' +
 
         '<label style="font-size:15px;font-weight:800;color:var(--ink-soft)">بک‌آپ در خود تیلفون</label>' +
-        '<p style="color:var(--ink-soft);font-size:13px;margin:6px 0 8px">یک فایل از تمام دیتا (با عکس‌ها) در تیلفون شما ذخیره می‌شود. پیش از هر کار بزرگ این را بگیرید.<br>' +
-          '<b>عکس‌ها سنک نمی‌شوند</b> — تنها راه بردنشان به تیلفون دیگر همین فایل است.</p>' +
+        '<p style="color:var(--ink-soft);font-size:13px;margin:6px 0 8px">یک فایل از تمام دیتا (با عکس‌ها) در تیلفون شما ذخیره می‌شود. پیش از هر کار بزرگ این را بگیرید.</p>' +
         '<button class="addline" id="dlBackup" style="margin:0 0 8px">⬇️ گرفتن فایل بک‌آپ</button>' +
         '<button class="addline" id="upBackup" style="margin:0 0 18px">⬆️ بازگرداندن از فایل بک‌آپ</button>' +
 
@@ -3524,7 +3662,10 @@
           chain = chain.then(function () { return photoSave(k, ph[k]); });
         });
         return chain;
-      }).then(function () { renderSaleGrid(); renderProducts(); }).catch(function () {});
+      }).then(function () {
+        renderSaleGrid(); renderProducts();
+        if (typeof syncPhotosOnChange === "function") syncPhotosOnChange();
+      }).catch(function () {});
       if (typeof syncOnLocalSave === "function") syncOnLocalSave();
       closeSheet();
       toast("بک‌آپ بازگردانده شد ✓");
@@ -3554,7 +3695,7 @@
     save0(LS_CPAY, custPayments); save0(LS_WASTE, waste); save0(LS_EXP, expenses);
     save0(LS_COUNTS, stockCounts); save0(LS_CASH, cashEntries);
     localStorage.setItem(LS_SEED, "1"); // دیگر نمونهٔ آزمایشی ساخته نشود
-    photoClear(); // عکس‌ها هم با اجناس می‌روند
+    photoClear().then(function () { if (typeof syncPhotosOnChange === "function") syncPhotosOnChange(); });
     invalidateDebts();
     if (typeof syncOnLocalSave === "function") syncOnLocalSave(); // نسخهٔ آنلاین هم خالی شود
     closeSheet();
@@ -4420,6 +4561,19 @@
     renderSaleGrid();
   });
   $("#searchClr").addEventListener("click", function () { $("#search").value = ""; this.style.display = "none"; renderSaleGrid(); $("#search").focus(); });
+
+  // جستجوی دفتر قرض — فقط فهرست دوباره رسم می‌شود، نه خود خانهٔ جستجو،
+  // پس انگشت کاربر وسط تایپ از آن نمی‌پرد.
+  $("#debtSearch").addEventListener("input", function () {
+    debtQuery = this.value.trim().toLowerCase();
+    $("#debtSearchClr").style.display = this.value ? "block" : "none";
+    if (debtView === "customers") renderCustomers(); else renderSuppliers();
+  });
+  $("#debtSearchClr").addEventListener("click", function () {
+    debtQuery = ""; $("#debtSearch").value = ""; this.style.display = "none";
+    if (debtView === "customers") renderCustomers(); else renderSuppliers();
+    $("#debtSearch").focus();
+  });
 
   document.addEventListener("click", function (e) { if (e.target.closest("[data-close]")) closeSheet(); });
 

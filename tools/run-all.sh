@@ -22,10 +22,21 @@ node mkhook.js || exit 1
 fail=0 total=0
 for f in verify.js verify?.js verify??.js; do
   [ -f "$f" ] || continue
-  out=$(node "$f" 2>&1 | tail -1)
-  printf '%-13s %s\n' "$f" "$out"
-  n=$(printf '%s' "$out" | grep -o '[0-9]\+' | head -1)
-  case "$out" in *❌*) fail=$((fail+1)) ;; *) total=$((total + ${n:-0})) ;; esac
+  out=$(node "$f" 2>&1)
+  last=$(printf '%s' "$out" | tail -1)
+  printf '%-13s %s\n' "$f" "$last"
+  n=$(printf '%s' "$last" | grep -o '[0-9]\+' | head -1)
+  case "$last" in
+    *❌*)
+      fail=$((fail+1))
+      # جزئیات شکست چاپ شود — ورنه شکستِ نادر قابل تشخیص نیست
+      printf '%s\n' "$out" | grep -E '❌|⚠️' | sed 's/^/              /'
+      # و برای بررسی بعدی نگه داشته شود
+      printf '%s\n' "$out" > "fail-$f.log"
+      echo "              (کامل در tools/fail-$f.log)"
+      ;;
+    *) total=$((total + ${n:-0})) ;;
+  esac
 done
 echo "----------------------------------------------"
 echo "مجموع آزمایش‌های موفق: $total"

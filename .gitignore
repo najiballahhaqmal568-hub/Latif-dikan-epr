@@ -14,3 +14,4 @@ node_modules/
 tools/test-index.html
 tools/fuzz-fail.json
 tools/fuzz-min.json
+tools/fail-*.log

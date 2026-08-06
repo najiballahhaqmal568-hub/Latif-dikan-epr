@@ -5,6 +5,7 @@
 // قبلی هر سه را جدا امتحان می‌کردند؛ این یکی امتحان می‌کند که **هر سه از یک
 // جا می‌آیند** — یعنی همان چیزی که آن دو باگ را ممکن کرده بود.
 const { chromium } = require('playwright');
+const { CHROME } = require('./browser');
 const path = require('path');
 const FILE = 'file://' + path.resolve(__dirname, 'test-index.html');
 
@@ -17,7 +18,7 @@ function check(name, actual, expected) {
 }
 
 (async () => {
-  const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' });
+  const browser = await chromium.launch({ executablePath: CHROME });
   const page = await browser.newPage({ viewport: { width: 412, height: 900 } });
   page.on('pageerror', e => { if (!/reading 'focus'/.test(e.message)) { console.log('  ⚠️', e.message); fail++; } });
   await page.goto(FILE);

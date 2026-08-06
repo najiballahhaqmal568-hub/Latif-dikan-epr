@@ -1,5 +1,6 @@
 // آزمایش سه مورد آخر: فروش بازار قرضی، سنک عکس‌ها، جستجوی دفتر قرض
 const { chromium } = require('playwright');
+const { CHROME } = require('./browser');
 const path = require('path');
 const FILE = 'file://' + path.resolve(__dirname, 'test-index.html');
 
@@ -26,7 +27,7 @@ async function reset(page, custCount) {
 }
 
 (async () => {
-  const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' });
+  const browser = await chromium.launch({ executablePath: CHROME });
   const page = await browser.newPage({ viewport: { width: 412, height: 900 } });
   page.on('pageerror', e => { console.log('  ⚠️ PAGE ERROR:', e.message); fail++; });
   await page.goto(FILE);

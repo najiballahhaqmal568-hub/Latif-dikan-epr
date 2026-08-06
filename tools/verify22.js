@@ -8,6 +8,7 @@
 // منفی‌شدن موجودی خودش جرم نیست؛ **خاموش** منفی‌شدن جرم است. اگر
 // دوکان‌دار خودش «به‌هرحال ثبت کن» را بزند، درست است.
 const { chromium } = require('playwright');
+const { CHROME } = require('./browser');
 const path = require('path');
 const FILE = 'file://' + path.resolve(__dirname, 'test-index.html');
 
@@ -20,7 +21,7 @@ function check(name, actual, expected) {
 }
 
 (async () => {
-  const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' });
+  const browser = await chromium.launch({ executablePath: CHROME });
   const page = await browser.newPage({ viewport: { width: 412, height: 900 } });
   page.on('pageerror', e => { if (!/reading 'focus'/.test(e.message)) { console.log('  ⚠️', e.message); fail++; } });
   await page.goto(FILE);

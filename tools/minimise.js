@@ -1,6 +1,7 @@
 // کوچک‌کردن خودکار یک دنبالهٔ شکست‌خورده تا کوچک‌ترین حالتی که باز هم سرخ شود.
 // هر قدم یکی‌یکی برداشته می‌شود؛ اگر باز سرخ ماند، برداشتنش نگه داشته می‌شود.
 const { chromium } = require('playwright');
+const { CHROME } = require('./browser');
 const path = require('path');
 const fs = require('fs');
 const FILE = 'file://' + path.resolve(__dirname, 'test-index.html');
@@ -9,7 +10,7 @@ const HARNESS = new Function('return ' + fs.readFileSync(path.join(__dirname,'fu
 
 (async () => {
   const fail = JSON.parse(fs.readFileSync(process.argv[2] || path.join(__dirname,'fuzz-fail.json'), 'utf8'));
-  const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' });
+  const browser = await chromium.launch({ executablePath: CHROME });
   const page = await browser.newPage({ viewport: { width: 412, height: 900 } });
   page.on('pageerror', () => {});
   await page.goto(FILE);

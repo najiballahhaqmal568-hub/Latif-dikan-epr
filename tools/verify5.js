@@ -1,5 +1,6 @@
 // آزمایش «شروع نو» و بک‌آپ
 const { chromium } = require('playwright');
+const { CHROME } = require('./browser');
 const path = require('path');
 const FILE = 'file://' + path.resolve(__dirname, 'test-index.html');
 
@@ -12,7 +13,7 @@ function check(name, actual, expected) {
 }
 
 (async () => {
-  const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' });
+  const browser = await chromium.launch({ executablePath: CHROME });
   const ctx = await browser.newContext({ acceptDownloads: true });
   const page = await ctx.newPage();
   page.on('pageerror', e => { console.log('  ⚠️ PAGE ERROR:', e.message); fail++; });

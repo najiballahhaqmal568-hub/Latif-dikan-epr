@@ -112,6 +112,53 @@ const HARNESS = function () {
     if (!near(b.expenses, rep.expenses - rep.expensesGoods))
       out.push("مصارف صندوق (" + b.expenses + ") با (کل − جنسی) (" + (rep.expenses - rep.expensesGoods) + ") جور نیست");
 
+    // ۱۲) حساب مستقل: همان رقم‌ها از روی دادهٔ خام دوباره حساب و مقایسه
+    //     می‌شوند — برای هر سه دوره. اگر فلتر دوره یا مرز ماه شمسی خراب
+    //     باشد، اینجا لو می‌رود.
+    ["today", "month", "all"].forEach(function (per) {
+      const R = w.__computeReport(per);
+      const start = w.__periodStart(per);
+      const inP = function (d) { return new Date(d) >= start; };
+      let tSales = 0, tCash = 0, tCredit = 0, tCogs = 0, tWaste = 0, tExp = 0, tShop = 0, tBaz = 0;
+      w.sales.forEach(function (sa) {
+        if (!inP(sa.date)) return;
+        tSales += sa.total;
+        if (sa.paymentType === "cash") tCash += sa.total; else tCredit += sa.total;
+        if (w.__saleChannel(sa) === "bazaar") tBaz += sa.total; else tShop += sa.total;
+        (sa.items || []).forEach(function (it) {
+          const pr = w.__findP(it.productId);
+          const buy = (it.buyPrice != null) ? it.buyPrice : (pr ? (pr.buy || 0) : 0);
+          tCogs += it.quantity * buy;
+        });
+      });
+      w.waste.forEach(function (x) { if (inP(x.date)) tWaste += x.quantity * x.buyPrice; });
+      w.expenses.forEach(function (x) { if (inP(x.date)) tExp += x.amount; });
+      const tag = " [دورهٔ " + per + "]";
+      if (!near(R.totalSales, tSales)) out.push("مجموع فروش گزارش با حساب مستقل جور نیست" + tag);
+      if (!near(R.cash, tCash)) out.push("فروش نقد گزارش با حساب مستقل جور نیست" + tag);
+      if (!near(R.credit, tCredit)) out.push("فروش قرض گزارش با حساب مستقل جور نیست" + tag);
+      if (!near(R.cogs, tCogs)) out.push("قیمت تمام‌شد گزارش با حساب مستقل جور نیست" + tag);
+      if (!near(R.wasteLoss, tWaste)) out.push("ضرر ضایعات گزارش با حساب مستقل جور نیست" + tag);
+      if (!near(R.expenses, tExp)) out.push("مصارف گزارش با حساب مستقل جور نیست" + tag);
+      if (!near(R.shopSales, tShop)) out.push("فروش دوکان گزارش با حساب مستقل جور نیست" + tag);
+      if (!near(R.bazaarSales, tBaz)) out.push("فروش بازار گزارش با حساب مستقل جور نیست" + tag);
+      // فرمول‌ها در هر دوره
+      if (!near(R.profit, R.totalSales - R.cogs - R.wasteLoss - R.cashShort))
+        out.push("فرمول فایده در دوره جور نیست" + tag);
+      if (!near(R.netProfit, R.profit - R.expenses))
+        out.push("فرمول فایدهٔ نهایی در دوره جور نیست" + tag);
+      if (!near(R.shopProfit + R.bazaarProfit, R.totalSales - R.cogs))
+        out.push("فایدهٔ کانال‌ها در دوره جور نیست" + tag);
+      if (!near(R.cashBox, R.cashIn - R.cashOut))
+        out.push("صندوق دوره با (داخل − خارج) جور نیست" + tag);
+      let ppp = 0;
+      Object.keys(R.perProduct).forEach(function (k) { ppp += R.perProduct[k].profit; });
+      if (!near(ppp, R.totalSales - R.cogs)) out.push("جمع فایدهٔ اجناس در دوره جور نیست" + tag);
+      ["totalSales","cogs","profit","netProfit","cashBox"].forEach(function (k) {
+        if (bad(R[k])) out.push("رقم «" + k + "» عدد نیست" + tag);
+      });
+    });
+
     return out;
   };
 
@@ -134,6 +181,46 @@ const HARNESS = function () {
                bazaar: r.bazaarSales, expG: r.expensesGoods,
                qty: w.products.reduce(function (a, p) { return a + p.qty; }, 0) };
     }
+  };
+
+  // ۱۳) رفت‌وبرگشت فایل بک‌آپ: گرفتن فایل → «شروع نو» → بازگرداندن.
+  //     این تکیه‌گاه نجات دوکان‌دار است؛ اگر چیزی گم یا خراب شود، سال
+  //     کارش می‌رود. عکس‌ها هم داخلش می‌آیند.
+  w.__fzBackupRoundTrip = function () {
+    const before = w.__fzSnap();
+    // همان کاری که downloadBackup می‌کند
+    const blob = JSON.parse(JSON.stringify(w.__collectData()));
+    blob.photos = JSON.parse(JSON.stringify(w.photoCacheForTest || {}));
+    blob.__backupDate = new Date().toISOString();
+    // همه چیز پاک شود، بعد از فایل برگردانده شود
+    w.__wipeAll();
+    const closeBtn = document.querySelector("#sheet [data-close]");
+    if (closeBtn) closeBtn.click();
+    document.getElementById("overlay").classList.remove("open");
+    const wiped = w.__fzSnap();
+    w.__confirmRestore(blob);
+    const ok = document.getElementById("restOk");
+    if (!ok) return ["دکمهٔ بازگرداندن پیدا نشد"];
+    ok.click();
+    document.getElementById("overlay").classList.remove("open");
+    const after = w.__fzSnap();
+    const out = [];
+    // اول مطمئن شویم «شروع نو» واقعاً پاک کرده بود (ورنه آزمایش بی‌معنی است)
+    if (wiped.sales !== 0 || wiped.custD !== 0) out.push("«شروع نو» همه را پاک نکرد");
+    Object.keys(before).forEach(function (k) {
+      if (!near(before[k], after[k]))
+        out.push("پس از بک‌آپ و بازگرداندن، «" + k + "» عوض شد: " + before[k] + " → " + after[k]);
+    });
+    return out;
+  };
+  w.__fzSnap = function () {
+    const r = w.__computeReport("all");
+    return { cash: w.__cashBalance(), sales: r.totalSales, cogs: r.cogs,
+             profit: r.profit, net: r.netProfit, waste: r.wasteLoss,
+             custD: w.__custDebtTotal(), supD: w.__supDebtTotal(),
+             bazaar: r.bazaarSales, expG: r.expensesGoods, exp: r.expenses,
+             qty: w.products.reduce(function (a, p) { return a + p.qty; }, 0),
+             nProd: w.products.length, nCust: w.customers.length, nSup: w.suppliers.length };
   };
 
   // ---------- بستن شیت‌های محافظ (تا دنباله بند نماند) ----------
@@ -308,6 +395,61 @@ const HARNESS = function () {
       w.__voidSupPayment(ok[a.i % ok.length]);
       const y = document.getElementById("voidOk"); if (y) y.click();
     },
+    // شمارش شبانهٔ صندوق (کسری/زیادت)
+    cashCount: function (a) {
+      document.querySelector('nav.tabs button[data-scr="more"]').click();
+      w.moreView = "cash"; w.__renderMore();
+      const btn = document.getElementById("cashCountBtn"); if (!btn) return;
+      btn.click();
+      setVal("ccAmt", Math.max(0, +(w.__cashBalance() + (a.i - 2) * 137).toFixed(2)));
+      const ok = document.getElementById("ccOk"); if (ok) ok.click();
+    },
+    // موجودی اول صندوق
+    opening: function (a) {
+      w.__openCashOpening();
+      setVal("obAmt", a.amt);
+      const ok = document.getElementById("obOk"); if (ok) ok.click();
+    },
+    // فاکتور چندقلمی
+    purchaseMulti: function (a) {
+      const lines = [];
+      for (let k = 0; k < 1 + (a.i % 3); k++) {
+        const p = w.products[(a.pi + k) % w.products.length]; if (!p) continue;
+        if (lines.some(function (l) { return l.productId === p.id; })) continue;
+        lines.push({ productId: p.id, name: p.name, unit: p.unit,
+                     qty: +(a.qty / (k + 1)).toFixed(2), buyPrice: +(a.price / (k + 1)).toFixed(2) });
+      }
+      if (!lines.length) return;
+      w.draft = { supplierName: a.sup, phone: "", date: a.date, paid: a.paid, lines: lines };
+      w.__savePurchase();
+    },
+    // ویرایش جنس: تعداد یا نرخ عوض شود
+    editProduct: function (a) {
+      const p = w.products[a.pi % w.products.length]; if (!p) return;
+      w.__openProductForm(p);
+      if (a.credit) setVal("fQty", Math.max(0, +(p.qty + (a.i - 2) * 3).toFixed(2)));
+      else setVal("fSell", Math.max(1, +(p.sell + (a.i - 2)).toFixed(2)));
+      const sv = document.getElementById("fSave"); if (sv) sv.click();
+      const qc = document.getElementById("qcOk"); if (qc) qc.click();
+    },
+    // فروش دو قلم در یک سبد
+    saleMulti: function (a) {
+      w.cart.length = 0;
+      for (let k = 0; k < 2; k++) {
+        const p = w.products[(a.pi + k) % w.products.length]; if (!p) continue;
+        w.__addToCart(p.id, +(a.qty / (k + 1)).toFixed(2));
+      }
+      w.__finishSale(a.credit ? "credit" : "cash", a.credit ? a.name : null);
+    },
+    // حذف جنس
+    deleteProduct: function (a) {
+      if (w.products.length <= 1) return;
+      const p = w.products[a.pi % w.products.length]; if (!p) return;
+      w.__openProductForm(p);
+      const del = document.getElementById("fDelete"); if (!del) return;
+      del.click();
+      const yes = document.getElementById("delYes"); if (yes) yes.click();
+    },
     // شمارش ماهانه
     count: function (a) {
       document.querySelector('nav.tabs button[data-scr="more"]').click();
@@ -355,6 +497,8 @@ const HARNESS = function () {
     }
     const rt = w.__fzRoundTrip();
     if (rt.length) return { step: seq.length, op: "round-trip", violations: rt };
+    const bk = w.__fzBackupRoundTrip();
+    if (bk.length) return { step: seq.length, op: "backup-round-trip", violations: bk };
     return null;
   };
 };
@@ -370,10 +514,11 @@ const HARNESS = function () {
   await page.reload();
   await page.evaluate(HARNESS);
 
-  const OPNAMES = ['sale','sale','sale','purchase','purchase','returnSale','voidPurchase',
-                   'custPay','goodsIn','supPay','expense','goodsExp','bazaar','bazaar',
-                   'cashIn','cashOut','waste','voidWaste','voidGoodsExp','voidCustPay',
-                   'voidSupPay','count'];
+  const OPNAMES = ['sale','sale','sale','saleMulti','purchase','purchase','purchaseMulti',
+                   'returnSale','voidPurchase','custPay','goodsIn','supPay','expense',
+                   'goodsExp','bazaar','bazaar','cashIn','cashOut','waste','voidWaste',
+                   'voidGoodsExp','voidCustPay','voidSupPay','count','cashCount',
+                   'opening','editProduct','deleteProduct'];
   const NAMES = ['احمد','کریم','رحیم','متفرقه'];
   const SUPS = ['تامین ۱','تامین ۲'];
   const DATES = ['2026-07-10','2026-07-20','2026-07-20','2026-08-01'];

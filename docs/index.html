@@ -791,6 +791,16 @@
     });
     return out;
   }
+  // شمار دفعاتی که دوکان‌دار خودش «به‌هرحال ثبت کن» را زده و موجودی را
+  // آگاهانه منفی کرده. ذخیره نمی‌شود؛ فقط تا آخر همین نشست می‌ماند.
+  //
+  // چرا هست: منفی‌شدن موجودی یک حالت **قانونی** است — وقتی دوکان‌دار
+  // خودش تصمیم گرفته باشد. ولی اگر بدون تصمیم او منفی شود، یعنی یک راه
+  // خروج جنس محافظ ندارد. با این شمارنده، حلقهٔ آزمایش می‌تواند این دو
+  // حالت را از هم جدا کند و راه بی‌محافظ را لو بدهد.
+  // (دو راه از شش راه واقعاً محافظ نداشتند و همین‌طور پیدا شدند.)
+  var stockOverrides = 0;
+
   // اگر موجودی بس است true؛ ورنه شیت باز می‌شود و false برمی‌گردد.
   function guardStockOut(wants, what, proceed, onBack) {
     var short = stockShortages(wants);
@@ -810,7 +820,7 @@
       '<button class="wbtn" id="stAnyway" style="width:100%;padding:13px;background:var(--danger)">به‌هرحال ثبت کن</button>' +
       '<div class="actions"><button class="ghost" id="stBack" style="width:100%">رقم را اصلاح می‌کنم</button></div>'
     );
-    $("#stAnyway").addEventListener("click", function () { closeSheet(); proceed(); });
+    $("#stAnyway").addEventListener("click", function () { stockOverrides++; closeSheet(); proceed(); });
     $("#stBack").addEventListener("click", function () { closeSheet(); if (onBack) onBack(); });
     return false;
   }
@@ -904,6 +914,18 @@
       : [["پول از صندوق", "− " + money(rec.amount)],
          ["قرض " + (c ? c.name : "مشتری"), "＋ " + money(rec.amount)]],
     function () {
+      // باطل‌کردن «دریافت به جنس» جنس را از گدام پس می‌گیرد. اگر همان جنس
+      // در این میان فروخته شده باشد، موجودی خاموش منفی می‌شد — پس مثل هر
+      // راه دیگرِ خروج جنس، از محافظ موجودی می‌گذرد.
+      if (goods && !guardStockOut([{ productId: rec.productId, qty: rec.qty }],
+        "این جنس پس گرفته می‌شود، ولی در گدام کم است:",
+        function () { doVoidCustPayment(rec, c, goods); },
+        function () { voidCustPayment(rec); })) return;
+      doVoidCustPayment(rec, c, goods);
+    });
+  }
+  function doVoidCustPayment(rec, c, goods) {
+    {
       var warn = [];
       if (goods) {
         var p = findP(rec.productId);
@@ -924,7 +946,7 @@
       if (c) openCustomerDetail(c);
       toast("رسید باطل شد ✓");
       voidWarnSheet(warn, function () {});
-    });
+    }
   }
 
   // ---- ۴) پول داخل / پول خارج صندوق ----
@@ -4601,6 +4623,12 @@
     $("#wOk").addEventListener("click", function () {
       var qty = parseFloat($("#wQty").value) || 0;
       if (qty <= 0) return;
+      // ضایعات هم خروج جنس است. بدون محافظ، تایپ ۹۹۹ به‌جای ۹ موجودی را
+      // منفی می‌کرد **و** ضرر ساختگی به اندازهٔ همان مقدار در فایده می‌نشست.
+      if (!guardStockOut([{ productId: p.id, qty: qty }],
+        "این مقدار بیشتر از موجودی گدام است:",
+        function () { recordWaste(p, qty, reason); },
+        function () { openWasteForm(p, reason); })) return;
       recordWaste(p, qty, reason);
     });
   }

@@ -34,12 +34,16 @@ const fns = [
   'renderBazaar', 'renderCart', 'renderCash', 'renderCustomers', 'renderDebts',
   'renderExpenses', 'renderMore', 'renderProducts', 'renderPurchaseForm',
   'renderSaleGrid', 'renderSuppliers', 'renderWaste',
+  'openWasteForm',
   'restoreBuyPrice', 'returnSale', 'saleChannel', 'save0', 'saveCount',
   'savePurchase', 'shrinkImage', 'supBreakdown', 'supDebt', 'supDebtTotal',
   'syncPullPhotos', 'syncPushPhotos', 'toJalali', 'todayISO', 'todaySales',
   'voidCashEntry', 'voidCustPayment', 'voidGoodsExpense', 'voidPurchase',
   'voidSupPayment', 'voidWaste', 'wipeAll'
 ];
+
+// شمارندهٔ «به‌هرحال ثبت کن» متغیر است نه فنکشن — جدا صادر می‌شود
+const vars = ['stockOverrides'];
 
 // نگهبان فهرست: تکرار خاموش نماند
 [['names', names], ['fns', fns]].forEach(function (pair) {
@@ -51,6 +55,7 @@ const fns = [
 let hook = '\n';
 names.forEach(n => { hook += '  Object.defineProperty(window,"' + n + '",{get:function(){return ' + n + ';},set:function(v){' + n + '=v;}});\n'; });
 fns.forEach(f => { hook += '  window.__' + f + '=' + f + ';\n'; });
+vars.forEach(v => { hook += '  Object.defineProperty(window,"__' + v + '",{get:function(){return ' + v + ';},set:function(x){' + v + '=x;}});\n'; });
 
 const i = h.lastIndexOf('})();');
 fs.writeFileSync(path.join(__dirname, 'test-index.html'), h.slice(0, i) + hook + h.slice(i));

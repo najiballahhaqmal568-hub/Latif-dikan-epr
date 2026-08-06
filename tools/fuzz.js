@@ -159,6 +159,22 @@ const HARNESS = function () {
       });
     });
 
+    // ۱۴) گدام: موجودی هیچ جنسی نباید منفی شود، **مگر** خودِ دوکان‌دار
+    //     «به‌هرحال ثبت کن» را زده باشد.
+    //
+    //     چرا این قانون دیر آمد: سیزده قانون اول همه دربارهٔ پول و قرض
+    //     بودند و هیچ‌کدام گدام را نمی‌پاییدند. برای همین دو راهِ خروج
+    //     جنس که محافظ نداشتند از ۶۰٬۰۰۰ کار fuzz سالم گذشتند —
+    //     باطل‌کردن «دریافت به جنس»، و ثبت ضایعات بیشتر از موجودی
+    //     (که ضرر ساختگی هم به فایده می‌زد).
+    if (w.__stockOverrides === 0) {
+      w.products.forEach(function (p) {
+        if (p.qty < -0.0005) {
+          out.push("موجودی «" + p.name + "» بدون تصمیم دوکان‌دار منفی شد: " + p.qty);
+        }
+      });
+    }
+
     return out;
   };
 
@@ -366,10 +382,18 @@ const HARNESS = function () {
     waste: function (a) {
       if (!w.products.length) return;
       const p = w.products[a.pi % w.products.length];
-      w.waste.push({ id: w.__id(), date: new Date().toISOString(), productId: p.id,
-        productName: p.name, unit: p.unit, quantity: a.qty, buyPrice: p.buy || 0, reason: "damaged" });
-      p.qty = +(p.qty - a.qty).toFixed(3);
-      w.__save0("dukan.waste.v1", w.waste); w.__save0("dukan.products.v1", w.products);
+      // از راه واقعیِ فورم ضایعات، نه ساختن دستی رکورد.
+      //
+      // پیش از این این کار رکورد را خودش می‌ساخت و موجودی را خودش کم
+      // می‌کرد — یعنی محافظ موجودی اصلاً امتحان نمی‌شد. حلقه فکر می‌کرد
+      // ضایعات را می‌پاید، ولی در واقع کود خودش را می‌پایید. یک باگ
+      // واقعی (ثبت ضایعات بیشتر از موجودی) درست از همین‌جا پنهان ماند.
+      w.__openWasteForm(p, a.guard < 0.5 ? "spoiled" : "expired");
+      const inp = document.getElementById("wQty");
+      if (!inp) return;
+      inp.value = String(a.qty);
+      const ok = document.getElementById("wOk");
+      if (ok) ok.click();
     },
     voidWaste: function (a) {
       const ok = w.waste.filter(function (x) { return !w.__isVoided(x); });
@@ -491,6 +515,9 @@ const HARNESS = function () {
     w.products.push({ id: "E", name: "وای‌فای تیرشده", type: "wifi", unit: "gb", buy: 12, sell: 20, qty: 60, expiry: past.toISOString().slice(0, 10) });
     w.cashEntries.push({ id: "op", date: "2020-01-01T00:00:00.000Z", kind: "opening", amount: 50000 });
     w.__invalidateDebts();
+    // شمارندهٔ «به‌هرحال ثبت کن» هر دنباله از نو — ورنه یک اجازهٔ آگاهانه
+    // در دنبالهٔ اول، قانون ۱۴ را برای تمام دنباله‌های بعدی خاموش می‌کرد.
+    w.__stockOverrides = 0;
     w.__fzCloseSheet();
 
     for (let i = 0; i < seq.length; i++) {

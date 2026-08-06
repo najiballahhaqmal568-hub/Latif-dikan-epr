@@ -1044,35 +1044,92 @@
     cashEntries.forEach(function (x) { if (x.kind === "opening") e = x; });
     return e;
   }
+  // یگانه جایی که نوشته می‌شود «کدام رکورد پول را در صندوق می‌آورد یا می‌برد».
+  // مانده، تفصیل، رد پول، و بخش صندوقِ گزارش‌ها همه از همین یک فهرست ساخته
+  // می‌شوند.
+  //
+  // چرا: پیش از این همین قانون سه بار جدا نوشته شده بود (تفصیل، رد پول،
+  // گزارش) و دو بار یکی از سه جا از قلم افتاد — یک بار «مصرف خانه به جنس»
+  // که در رد پول نبود، و یک بار رکورد باطل‌کردن خرید که با شرط `paid > 0`
+  // از رد پول می‌افتاد. هر دو بار رقم صندوق غلط شد و هیچ اروری بلند نشد.
+  // حالا قانون تازه یک بار نوشته می‌شود و هر سه جا خودکار درست می‌مانند.
+  //
+  // هر رویداد: { date, amount, kind, label, entry?, opening? }
+  //   amount → مثبت: پول داخل شد، منفی: پول خارج شد
+  //   kind   → opening | sales | custPaid | purchasePaid | supPaid |
+  //            expenses | manualIn | manualOut | adjust
+  //
+  // کارِ نمایش (مرتب‌کردن، ماندهٔ پی‌درپی) اینجا نیست؛ در cashMovements است.
+  function cashEvents() {
+    var out = [];
+    sales.forEach(function (s) {
+      if (s.paymentType !== "cash") return;
+      out.push({ date: s.date, amount: s.total, kind: "sales",
+        label: s.returnOf ? "برگشتی فروش نقد" : "فروش نقد" });
+    });
+    custPayments.forEach(function (p) {
+      if (isGoodsPay(p)) return; // به جنس بود، پولی داخل صندوق نشد
+      var c = findC(p.customerId);
+      out.push({ date: p.date, amount: p.amount, kind: "custPaid",
+        label: "دریافت از " + (c ? c.name : "مشتری") });
+    });
+    purchases.forEach(function (p) {
+      // شرط «صفر نبودن» است، نه «بزرگ‌تر از صفر»: رکورد باطل‌کردن paid منفی
+      // دارد و باید پول را پس بیاورد.
+      if (!p.paid) return;
+      out.push({ date: p.date, amount: -p.paid, kind: "purchasePaid",
+        label: (p.reverseOf ? "برگشت خرید نقد — " : "خرید نقد — ") + (p.supplierName || "") });
+    });
+    supPayments.forEach(function (p) {
+      var s = findS(p.supplierId);
+      out.push({ date: p.date, amount: -p.amount, kind: "supPaid",
+        label: "پرداخت به " + (s ? s.name : "تامین‌کننده") });
+    });
+    expenses.forEach(function (e) {
+      if (isGoodsExpense(e)) return; // جنس از گدام رفت، نه پول از صندوق
+      out.push({ date: e.date, amount: -e.amount, kind: "expenses",
+        label: "مصرف خانه" + (e.note ? " — " + e.note : "") });
+    });
+    cashEntries.forEach(function (e) {
+      // موجودی اول همیشه یکی است — openCashOpening پیش از ثبت، قبلی را
+      // برمی‌دارد؛ پس این حلقه رقم را دوباره نمی‌شمارد.
+      if (e.kind === "opening") out.push({ date: e.date, amount: e.amount, kind: "opening",
+        label: "موجودی اول صندوق", opening: true });
+      else if (e.kind === "in") out.push({ date: e.date, amount: e.amount, kind: "manualIn",
+        entry: e, label: "پول داخل شد" + (e.note ? " — " + e.note : "") });
+      else if (e.kind === "out") out.push({ date: e.date, amount: -e.amount, kind: "manualOut",
+        entry: e, label: "پول خارج شد" + (e.note ? " — " + e.note : "") });
+      else if (e.kind === "count") out.push({ date: e.date, amount: e.amount, kind: "adjust",
+        label: (e.amount < 0 ? "کسری شمارش صندوق" : "زیادت شمارش صندوق") });
+    });
+    return out;
+  }
+
+  // در جدول تفصیل، رقم‌های خارج‌شونده مثبت نوشته می‌شوند (چون در نمایش
+  // خودشان علامت «−» دارند)، پس علامت رویداد اینجا برگردانده می‌شود.
+  var CASH_OUT_KINDS = { purchasePaid: 1, supPaid: 1, expenses: 1, manualOut: 1 };
   function cashBreakdown() {
-    var op = cashOpeningEntry();
-    var b = { opening: op ? op.amount : 0, sales: 0, custPaid: 0,
+    var b = { opening: 0, sales: 0, custPaid: 0,
               purchasePaid: 0, supPaid: 0, expenses: 0,
               manualIn: 0, manualOut: 0, adjust: 0 };
-    sales.forEach(function (s) { if (s.paymentType === "cash") b.sales += s.total; });
-    custPayments.forEach(function (p) { if (!isGoodsPay(p)) b.custPaid += p.amount; });
-    purchases.forEach(function (p) { b.purchasePaid += (p.paid || 0); });
-    supPayments.forEach(function (p) { b.supPaid += p.amount; });
-    expenses.forEach(function (e) { if (!isGoodsExpense(e)) b.expenses += e.amount; });
-    cashEntries.forEach(function (e) {
-      if (e.kind === "in") b.manualIn += e.amount;
-      else if (e.kind === "out") b.manualOut += e.amount;
-      else if (e.kind === "count") b.adjust += e.amount;
+    cashEvents().forEach(function (e) {
+      if (b[e.kind] === undefined) return;
+      b[e.kind] += CASH_OUT_KINDS[e.kind] ? -e.amount : e.amount;
     });
     Object.keys(b).forEach(function (k) { b[k] = +b[k].toFixed(2); });
     return b;
   }
   function cashBalance() {
-    var b = cashBreakdown();
-    return +(b.opening + b.sales + b.custPaid + b.manualIn + b.adjust -
-             b.purchasePaid - b.supPaid - b.expenses - b.manualOut).toFixed(2);
+    var s = 0;
+    cashEvents().forEach(function (e) { s += e.amount; });
+    return +s.toFixed(2);
   }
   // جمع همهٔ حرکت‌ها بدون موجودی اول — برای حساب‌کردن موجودی اولِ درست
   // از روی پول شمرده‌شدهٔ امشب: موجودی اول = پول واقعی − همین جمع.
   function cashNetWithoutOpening() {
-    var b = cashBreakdown();
-    return +(b.sales + b.custPaid + b.manualIn + b.adjust -
-             b.purchasePaid - b.supPaid - b.expenses - b.manualOut).toFixed(2);
+    var s = 0;
+    cashEvents().forEach(function (e) { if (e.kind !== "opening") s += e.amount; });
+    return +s.toFixed(2);
   }
 
   // ---------- محافظ صندوق ----------
@@ -3236,22 +3293,17 @@
     r.profit = r.totalSales - r.cogs - r.wasteLoss;
     r.netProfit = r.profit - r.expenses;
 
-    // صندوق نقد: پیسه‌ای که باید در دست باشد
-    r.cashIn = r.cash;
-    // دریافت «به جنس» پول نقد نیست، پس در صندوق نمی‌آید
-    custPayments.forEach(function (x) { if (!isGoodsPay(x) && new Date(x.date) >= start) r.cashIn += x.amount; });
-    purchases.forEach(function (pu) { if (new Date(pu.date) >= start) r.cashOut += (pu.paid || 0); });
-    supPayments.forEach(function (x) { if (new Date(x.date) >= start) r.cashOut += x.amount; });
-    r.cashOut += +(r.expenses - r.expensesGoods).toFixed(2); // فقط مصارف نقدی
-    // رویدادهای خود صندوق: موجودی اول، پول دستی، و تعدیل شمارش
-    cashEntries.forEach(function (e) {
+    // صندوق نقد: پیسه‌ای که باید در دست باشد.
+    // از همان رویدادهای cashEvents() ساخته می‌شود — پس قانون «چه چیزی پول
+    // است» اینجا دوباره نوشته نمی‌شود و با صفحهٔ صندوق همیشه جور می‌ماند.
+    cashEvents().forEach(function (e) {
       if (new Date(e.date) < start) return;
-      if (e.kind === "opening" || e.kind === "in") r.cashIn += e.amount;
-      else if (e.kind === "out") r.cashOut += e.amount;
-      else if (e.kind === "count") {
+      if (e.kind === "adjust") {
+        // کسری شمارش = ضرر واقعی؛ زیادت مثل پول داخل‌شده
         if (e.amount >= 0) r.cashIn += e.amount;
-        else { r.cashOut += -e.amount; r.cashShort += -e.amount; } // کسری = ضرر واقعی
-      }
+        else { r.cashOut += -e.amount; r.cashShort += -e.amount; }
+      } else if (CASH_OUT_KINDS[e.kind]) r.cashOut += -e.amount;
+      else r.cashIn += e.amount;
     });
     r.shopProfit = +r.shopProfit.toFixed(2); r.bazaarProfit = +r.bazaarProfit.toFixed(2);
     r.shopSales = +r.shopSales.toFixed(2); r.bazaarSales = +r.bazaarSales.toFixed(2);
@@ -3818,41 +3870,10 @@
 
   // ---------- صفحهٔ صندوق ----------
   // همهٔ حرکت‌های پول نقد، از هر منبعی، در یک فهرست (رد پول)
+  // رد پول = همان رویدادهای صندوق، مرتب‌شده و با ماندهٔ پی‌درپی.
+  // اینجا دیگر هیچ قانونی نیست؛ فقط نمایش. قانون در cashEvents() است.
   function cashMovements() {
-    var out = [];
-    sales.forEach(function (s) {
-      if (s.paymentType !== "cash") return;
-      out.push({ date: s.date, amount: s.total,
-        label: s.returnOf ? "برگشتی فروش نقد" : "فروش نقد" });
-    });
-    custPayments.forEach(function (p) {
-      if (isGoodsPay(p)) return; // به جنس بود، پولی داخل صندوق نشد
-      var c = findC(p.customerId);
-      out.push({ date: p.date, amount: p.amount, label: "دریافت از " + (c ? c.name : "مشتری") });
-    });
-    purchases.forEach(function (p) {
-      // شرط باید «صفر نبودن» باشد، نه «بزرگ‌تر از صفر»: رکورد باطل‌کردن
-      // paid منفی دارد و با شرط قبلی از رد پول می‌افتاد — صندوق پول را پس
-      // می‌آورد ولی رد پول سطرش را نداشت و مانده‌اش جور نمی‌آمد.
-      if (!p.paid) return;
-      out.push({ date: p.date, amount: -p.paid,
-        label: (p.reverseOf ? "برگشت خرید نقد — " : "خرید نقد — ") + (p.supplierName || "") });
-    });
-    supPayments.forEach(function (p) {
-      var s = findS(p.supplierId);
-      out.push({ date: p.date, amount: -p.amount, label: "پرداخت به " + (s ? s.name : "تامین‌کننده") });
-    });
-    expenses.forEach(function (e) {
-      if (isGoodsExpense(e)) return; // جنس از گدام رفت، نه پول از صندوق
-      out.push({ date: e.date, amount: -e.amount, label: "مصرف خانه" + (e.note ? " — " + e.note : "") });
-    });
-    cashEntries.forEach(function (e) {
-      if (e.kind === "opening") out.push({ date: e.date, amount: e.amount, label: "موجودی اول صندوق", opening: true });
-      else if (e.kind === "in") out.push({ date: e.date, amount: e.amount, entry: e, label: "پول داخل شد" + (e.note ? " — " + e.note : "") });
-      else if (e.kind === "out") out.push({ date: e.date, amount: -e.amount, entry: e, label: "پول خارج شد" + (e.note ? " — " + e.note : "") });
-      else if (e.kind === "count") out.push({ date: e.date, amount: e.amount,
-        label: (e.amount < 0 ? "کسری شمارش صندوق" : "زیادت شمارش صندوق") });
-    });
+    var out = cashEvents();
     // کهنه به نو مرتب می‌شود تا مانده پی‌درپی حساب شود.
     // «موجودی اول» همیشه اول می‌آید — چون نقطهٔ شروع دفتر است و تاریخ
     // فاکتورها فقط روز دارد (نیمه‌شب)، ورنه پیش از آن می‌افتاد.

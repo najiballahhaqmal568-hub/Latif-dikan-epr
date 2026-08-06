@@ -791,15 +791,21 @@
     });
     return out;
   }
-  // شمار دفعاتی که دوکان‌دار خودش «به‌هرحال ثبت کن» را زده و موجودی را
-  // آگاهانه منفی کرده. ذخیره نمی‌شود؛ فقط تا آخر همین نشست می‌ماند.
+  // اجناسی که دوکان‌دار خودش «به‌هرحال ثبت کن» را برایشان زده و آگاهانه
+  // موجودی‌شان را منفی کرده. ذخیره نمی‌شود؛ فقط تا آخر همین نشست می‌ماند.
   //
   // چرا هست: منفی‌شدن موجودی یک حالت **قانونی** است — وقتی دوکان‌دار
   // خودش تصمیم گرفته باشد. ولی اگر بدون تصمیم او منفی شود، یعنی یک راه
-  // خروج جنس محافظ ندارد. با این شمارنده، حلقهٔ آزمایش می‌تواند این دو
-  // حالت را از هم جدا کند و راه بی‌محافظ را لو بدهد.
+  // خروج جنس محافظ ندارد. با این نشان، حلقهٔ آزمایش این دو حالت را از هم
+  // جدا می‌کند و راه بی‌محافظ را لو می‌دهد.
   // (دو راه از شش راه واقعاً محافظ نداشتند و همین‌طور پیدا شدند.)
-  var stockOverrides = 0;
+  //
+  // چرا **فی جنس** و نه یک شمارندهٔ ساده: با شمارنده، اولین «به‌هرحال»
+  // در یک دنباله، قانون را برای **تمام** اجناس تا آخر آن دنباله خاموش
+  // می‌کرد — پوشش را به ۶۴٪ قدم‌ها می‌رساند. حالا فقط همان جنس کنار
+  // می‌رود و بقیه پاییده می‌مانند.
+  var stockOverrides = 0;       // فقط برای شمارش
+  var stockOverridden = {};     // productId → true
 
   // اگر موجودی بس است true؛ ورنه شیت باز می‌شود و false برمی‌گردد.
   function guardStockOut(wants, what, proceed, onBack) {
@@ -820,7 +826,11 @@
       '<button class="wbtn" id="stAnyway" style="width:100%;padding:13px;background:var(--danger)">به‌هرحال ثبت کن</button>' +
       '<div class="actions"><button class="ghost" id="stBack" style="width:100%">رقم را اصلاح می‌کنم</button></div>'
     );
-    $("#stAnyway").addEventListener("click", function () { stockOverrides++; closeSheet(); proceed(); });
+    $("#stAnyway").addEventListener("click", function () {
+      stockOverrides++;
+      wants.forEach(function (w) { stockOverridden[w.productId] = true; });
+      closeSheet(); proceed();
+    });
     $("#stBack").addEventListener("click", function () { closeSheet(); if (onBack) onBack(); });
     return false;
   }
@@ -919,34 +929,35 @@
       // راه دیگرِ خروج جنس، از محافظ موجودی می‌گذرد.
       if (goods && !guardStockOut([{ productId: rec.productId, qty: rec.qty }],
         "این جنس پس گرفته می‌شود، ولی در گدام کم است:",
-        function () { doVoidCustPayment(rec, c, goods); },
+        function () { doVoidCustPayment(rec); },
         function () { voidCustPayment(rec); })) return;
-      doVoidCustPayment(rec, c, goods);
+      doVoidCustPayment(rec);
     });
   }
-  function doVoidCustPayment(rec, c, goods) {
-    {
-      var warn = [];
-      if (goods) {
-        var p = findP(rec.productId);
-        if (p) p.qty = +(p.qty - rec.qty).toFixed(3);
-        restoreBuyPrice(rec.productId, rec.prevBuy, rec.prevEst, rec, warn);
-        save(LS_P, products);
-      }
-      rec.reversed = true;
-      var rev = { id: id(), customerId: rec.customerId, date: new Date().toISOString(),
-        amount: -rec.amount, reverseOf: rec.id };
-      if (goods) {
-        rev.kind = "goods"; rev.productId = rec.productId; rev.productName = rec.productName;
-        rev.unit = rec.unit; rev.qty = -rec.qty; rev.unitPrice = rec.unitPrice;
-      }
-      custPayments.push(rev);
-      save(LS_CPAY, custPayments);
-      closeSheet(); renderCustomers(); renderProducts(); renderSaleGrid();
-      if (c) openCustomerDetail(c);
-      toast("رسید باطل شد ✓");
-      voidWarnSheet(warn, function () {});
+  // rec خودش هر دو را می‌گوید؛ پس نه c لازم است نه goods.
+  function doVoidCustPayment(rec) {
+    var c = findC(rec.customerId);
+    var goods = isGoodsPay(rec);
+    var warn = [];
+    if (goods) {
+      var p = findP(rec.productId);
+      if (p) p.qty = +(p.qty - rec.qty).toFixed(3);
+      restoreBuyPrice(rec.productId, rec.prevBuy, rec.prevEst, rec, warn);
+      save(LS_P, products);
     }
+    rec.reversed = true;
+    var rev = { id: id(), customerId: rec.customerId, date: new Date().toISOString(),
+      amount: -rec.amount, reverseOf: rec.id };
+    if (goods) {
+      rev.kind = "goods"; rev.productId = rec.productId; rev.productName = rec.productName;
+      rev.unit = rec.unit; rev.qty = -rec.qty; rev.unitPrice = rec.unitPrice;
+    }
+    custPayments.push(rev);
+    save(LS_CPAY, custPayments);
+    closeSheet(); renderCustomers(); renderProducts(); renderSaleGrid();
+    if (c) openCustomerDetail(c);
+    toast("رسید باطل شد ✓");
+    voidWarnSheet(warn, function () {});
   }
 
   // ---- ۴) پول داخل / پول خارج صندوق ----
@@ -1085,7 +1096,7 @@
   function cashEvents() {
     var out = [];
     sales.forEach(function (s) {
-      if (s.paymentType !== "cash") return;
+      if (!saleIsCash(s)) return;
       out.push({ date: s.date, amount: s.total, kind: "sales",
         label: s.returnOf ? "برگشتی فروش نقد" : "فروش نقد" });
     });
@@ -1130,13 +1141,15 @@
   // در جدول تفصیل، رقم‌های خارج‌شونده مثبت نوشته می‌شوند (چون در نمایش
   // خودشان علامت «−» دارند)، پس علامت رویداد اینجا برگردانده می‌شود.
   var CASH_OUT_KINDS = { purchasePaid: 1, supPaid: 1, expenses: 1, manualOut: 1 };
+  // رقم همان‌طور که در جدول/گزارش نوشته می‌شود (خارج‌شونده‌ها مثبت)
+  function cashRowAmount(e) { return CASH_OUT_KINDS[e.kind] ? -e.amount : e.amount; }
   function cashBreakdown() {
     var b = { opening: 0, sales: 0, custPaid: 0,
               purchasePaid: 0, supPaid: 0, expenses: 0,
               manualIn: 0, manualOut: 0, adjust: 0 };
     cashEvents().forEach(function (e) {
       if (b[e.kind] === undefined) return;
-      b[e.kind] += CASH_OUT_KINDS[e.kind] ? -e.amount : e.amount;
+      b[e.kind] += cashRowAmount(e);
     });
     Object.keys(b).forEach(function (k) { b[k] = +b[k].toFixed(2); });
     return b;
@@ -1655,6 +1668,9 @@
   // پس نبودنش یعنی «دوکان» — هیچ رقم گذشته تغییر نمی‌کند.
   // برگشتی همان کانال فروش اصلی را می‌گیرد، ورنه رقم‌های کانال نادرست می‌شد.
   function saleChannel(s) { return (s && s.channel === "bazaar") ? "bazaar" : "shop"; }
+  // «آیا این فروش پول نقد آورد» — یک جا، تا cashEvents و گزارش هرگز از هم
+  // جدا نیفتند. (پیش از این گزارش خودش جدا تصمیم می‌گرفت.)
+  function saleIsCash(s) { return !!s && s.paymentType === "cash"; }
 
   function finishSale(type, customerName) {
     if (cart.length === 0) return;
@@ -3289,7 +3305,7 @@
       var isBazaar = saleChannel(s) === "bazaar";
       r.totalSales += s.total;
       if (isBazaar) r.bazaarSales += s.total; else r.shopSales += s.total;
-      if (s.paymentType === "cash") r.cash += s.total; else r.credit += s.total;
+      if (saleIsCash(s)) r.cash += s.total; else r.credit += s.total;
       (s.items || []).forEach(function (it) {
         var p = findP(it.productId);
         // قیمت خرید لحظهٔ فروش؛ اگر نبود (فروش قدیمی) قیمت خرید فعلی
@@ -3324,8 +3340,8 @@
         // کسری شمارش = ضرر واقعی؛ زیادت مثل پول داخل‌شده
         if (e.amount >= 0) r.cashIn += e.amount;
         else { r.cashOut += -e.amount; r.cashShort += -e.amount; }
-      } else if (CASH_OUT_KINDS[e.kind]) r.cashOut += -e.amount;
-      else r.cashIn += e.amount;
+      } else if (CASH_OUT_KINDS[e.kind]) r.cashOut += cashRowAmount(e);
+      else r.cashIn += cashRowAmount(e);
     });
     r.shopProfit = +r.shopProfit.toFixed(2); r.bazaarProfit = +r.bazaarProfit.toFixed(2);
     r.shopSales = +r.shopSales.toFixed(2); r.bazaarSales = +r.bazaarSales.toFixed(2);

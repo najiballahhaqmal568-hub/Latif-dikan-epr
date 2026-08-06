@@ -43,7 +43,7 @@ const fns = [
 ];
 
 // شمارندهٔ «به‌هرحال ثبت کن» متغیر است نه فنکشن — جدا صادر می‌شود
-const vars = ['stockOverrides'];
+const vars = ['stockOverrides', 'stockOverridden'];
 
 // نگهبان فهرست: تکرار خاموش نماند
 [['names', names], ['fns', fns]].forEach(function (pair) {

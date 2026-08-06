@@ -171,7 +171,7 @@
 
 ```bash
 npm install          # فقط playwright
-npm test             # ۷۲۶ آزمایش + حلقهٔ fuzz کوتاه
+npm test             # ۸۲۱ آزمایش + حلقهٔ fuzz کوتاه
 npm run test:long    # fuzz دراز
 ```
 

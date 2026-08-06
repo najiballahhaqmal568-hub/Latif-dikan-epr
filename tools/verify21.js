@@ -159,6 +159,28 @@ function check(name, actual, expected) {
   check('همه نوع دارند', r.noKind, 0);
   check('هیچ مبلغی خراب نیست', r.nan, 0);
 
+  // ===== ۶) «موجودی اول» چندتایی (دیتای بازگردانده‌شده) =====
+  // از راه اپ همیشه یکی است — openCashOpening پیش از ثبت، قبلی را برمی‌دارد.
+  // ولی در فایل بک‌آپ یا سنکِ کهنه می‌تواند چندتا باشد، و آن‌وقت کود قدیمی
+  // **با خودش جور نبود**: جدول تفصیل فقط آخری را می‌شمرد، رد پول همه را.
+  // حالا هر چهار مصرف‌کننده همه را می‌شمارند.
+  console.log('\n۶) دو «موجودی اول» در دیتای بازگردانده‌شده:');
+  r = await page.evaluate(() => {
+    const w = window;
+    ['sales','custPayments','purchases','supPayments','expenses'].forEach(k => { w[k].length = 0; });
+    w.cashEntries.length = 0;
+    w.cashEntries.push({ id:'op1', date:'2020-01-01T00:00:00.000Z', kind:'opening', amount:1000 });
+    w.cashEntries.push({ id:'op2', date:'2020-01-02T00:00:00.000Z', kind:'opening', amount:500 });
+    w.__invalidateDebts();
+    const mv = w.__cashMovements();
+    return { bal: w.__cashBalance(), opening: w.__cashBreakdown().opening,
+             mvTop: mv[0].balance, cashBox: w.__computeReport('all').cashBox };
+  });
+  check('تفصیل هر دو را می‌شمارد (۱٬۵۰۰)', r.opening, 1500);
+  check('مانده هم ۱٬۵۰۰', r.bal, 1500);
+  check('رد پول هم ۱٬۵۰۰ — با تفصیل جور است', r.mvTop, 1500);
+  check('گزارش هم ۱٬۵۰۰', r.cashBox, 1500);
+
   console.log('\n' + '='.repeat(46));
   console.log(fail === 0 ? `✅ همه درست — ${pass} آزمایش موفق` : `❌ ${fail} ناکام از ${pass + fail}`);
   await browser.close();

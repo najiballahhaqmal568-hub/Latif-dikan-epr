@@ -167,13 +167,14 @@ const HARNESS = function () {
     //     جنس که محافظ نداشتند از ۶۰٬۰۰۰ کار fuzz سالم گذشتند —
     //     باطل‌کردن «دریافت به جنس»، و ثبت ضایعات بیشتر از موجودی
     //     (که ضرر ساختگی هم به فایده می‌زد).
-    if (w.__stockOverrides === 0) {
-      w.products.forEach(function (p) {
-        if (p.qty < -0.0005) {
-          out.push("موجودی «" + p.name + "» بدون تصمیم دوکان‌دار منفی شد: " + p.qty);
-        }
-      });
-    }
+    //     نشان **فی جنس** است، نه یک شمارندهٔ سراسری: ورنه اولین
+    //     «به‌هرحال» تمام اجناس را تا آخر دنباله بی‌پایش می‌گذاشت.
+    const okNeg = w.__stockOverridden || {};
+    w.products.forEach(function (p) {
+      if (p.qty < -0.0005 && !okNeg[p.id]) {
+        out.push("موجودی «" + p.name + "» بدون تصمیم دوکان‌دار منفی شد: " + p.qty);
+      }
+    });
 
     return out;
   };
@@ -518,6 +519,7 @@ const HARNESS = function () {
     // شمارندهٔ «به‌هرحال ثبت کن» هر دنباله از نو — ورنه یک اجازهٔ آگاهانه
     // در دنبالهٔ اول، قانون ۱۴ را برای تمام دنباله‌های بعدی خاموش می‌کرد.
     w.__stockOverrides = 0;
+    w.__stockOverridden = {};
     w.__fzCloseSheet();
 
     for (let i = 0; i < seq.length; i++) {

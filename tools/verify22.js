@@ -166,6 +166,27 @@ function check(name, actual, expected) {
   check('موجودی دست‌نخورده', r.qty, 3);
   check('مصرفی ثبت نشد', r.n, 0);
 
+  // فروش بازار — تا این آزمایش نوشته شد، **هیچ** آزمایشی محافظ موجودی را
+  // روی فروش بازار نمی‌سنجید (نوشتهٔ قبلی من در tools/README.md غلط بود).
+  await page.evaluate(() => { document.getElementById('overlay').classList.remove('open'); });
+  await page.evaluate(() => window.__openBazaarSale());
+  await page.waitForTimeout(250);
+  await page.evaluate(() => { const b = document.getElementById('bPick'); if (b) b.click(); });
+  await page.waitForTimeout(250);
+  await page.evaluate(() => { const el = document.querySelector('#sheet [data-bp]'); if (el) el.click(); });
+  await page.waitForTimeout(250);
+  await page.evaluate(() => {
+    document.getElementById('bQty').value = '88';
+    document.getElementById('bPrice').value = '120';
+    document.getElementById('bOk').click();
+  });
+  await page.waitForTimeout(350);
+  r = await page.evaluate(() => ({ t: document.getElementById('sheet').textContent.indexOf('موجودی کم است') >= 0,
+                                   qty: window.__findP('P3').qty, n: window.sales.length }));
+  check('فروش بازار محافظ دارد', r.t, true);
+  check('موجودی دست‌نخورده', r.qty, 3);
+  check('فروش بازاری ثبت نشد', r.n, 0);
+
   console.log('\n' + '='.repeat(46));
   console.log(fail === 0 ? `✅ همه درست — ${pass} آزمایش موفق` : `❌ ${fail} ناکام از ${pass + fail}`);
   await browser.close();

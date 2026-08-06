@@ -450,6 +450,14 @@ const HARNESS = function () {
       del.click();
       const yes = document.getElementById("delYes"); if (yes) yes.click();
     },
+    // انتقال باقی‌ماندهٔ وای‌فای تیرشده به ضایعات
+    wifiWaste: function (a) {
+      document.querySelector('nav.tabs button[data-scr="more"]').click();
+      w.moreView = "wifi"; w.__renderMore();
+      const btns = document.querySelectorAll("[data-wifiwaste]");
+      if (!btns.length) return;
+      btns[a.i % btns.length].click();
+    },
     // شمارش ماهانه
     count: function (a) {
       document.querySelector('nav.tabs button[data-scr="more"]').click();
@@ -476,6 +484,11 @@ const HARNESS = function () {
     w.products.push({ id: "A", name: "برنج", type: "weighted", unit: "kg", buy: 80, sell: 100, qty: 100, expiry: "" });
     w.products.push({ id: "B", name: "کیک", type: "unit", unit: "piece", buy: 8, sell: 10, qty: 200, expiry: "" });
     w.products.push({ id: "C", name: "تخم مرغ", type: "unit", unit: "piece", buy: 5, sell: 15, qty: 0, expiry: "" });
+    // وای‌فای: یکی زنده، یکی تاریخ‌تیرشده (تا انتقال باقی‌مانده به ضایعات هم بیفتد)
+    var past = new Date(); past.setDate(past.getDate() - 5);
+    var fut = new Date(); fut.setDate(fut.getDate() + 40);
+    w.products.push({ id: "D", name: "وای‌فای", type: "wifi", unit: "gb", buy: 10, sell: 20, qty: 250, expiry: fut.toISOString().slice(0, 10) });
+    w.products.push({ id: "E", name: "وای‌فای تیرشده", type: "wifi", unit: "gb", buy: 12, sell: 20, qty: 60, expiry: past.toISOString().slice(0, 10) });
     w.cashEntries.push({ id: "op", date: "2020-01-01T00:00:00.000Z", kind: "opening", amount: 50000 });
     w.__invalidateDebts();
     w.__fzCloseSheet();
@@ -518,7 +531,7 @@ const HARNESS = function () {
                    'returnSale','voidPurchase','custPay','goodsIn','supPay','expense',
                    'goodsExp','bazaar','bazaar','cashIn','cashOut','waste','voidWaste',
                    'voidGoodsExp','voidCustPay','voidSupPay','count','cashCount',
-                   'opening','editProduct','deleteProduct'];
+                   'opening','editProduct','deleteProduct','wifiWaste'];
   const NAMES = ['احمد','کریم','رحیم','متفرقه'];
   const SUPS = ['تامین ۱','تامین ۲'];
   const DATES = ['2026-07-10','2026-07-20','2026-07-20','2026-08-01'];
@@ -533,7 +546,7 @@ const HARNESS = function () {
     for (let k = 0; k < OPS; k++) {
       seq.push({
         op: OPNAMES[Math.floor(rnd() * OPNAMES.length)],
-        pi: Math.floor(rnd() * 3),
+        pi: Math.floor(rnd() * 5),
         i: Math.floor(rnd() * 5),
         qty: +(1 + rnd() * 30).toFixed(rnd() < 0.5 ? 0 : 2),
         price: +(1 + rnd() * 120).toFixed(rnd() < 0.5 ? 0 : 2),

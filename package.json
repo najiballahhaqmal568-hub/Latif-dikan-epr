@@ -1,0 +1,12 @@
+{
+  "name": "dukan-latif-tools",
+  "private": true,
+  "description": "ابزار آزمایش اپ «دوکان لطیف» — خود اپ در docs/index.html است و به هیچ پکیجی نیاز ندارد",
+  "scripts": {
+    "test": "./tools/run-all.sh",
+    "test:long": "./tools/run-all.sh long"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.0"
+  }
+}

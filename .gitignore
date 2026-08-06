@@ -11,3 +11,6 @@ node_modules/
 # Misc
 *.log
 .DS_Store
+tools/test-index.html
+tools/fuzz-fail.json
+tools/fuzz-min.json

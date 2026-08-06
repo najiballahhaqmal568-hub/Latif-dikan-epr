@@ -1,0 +1,431 @@
+// حلقهٔ fuzz برای دفتر «دوکان لطیف».
+// دنباله‌های تصادفی از کارهای واقعی دوکان اجرا می‌شوند و بعد از هر قدم
+// «قوانین دفتر» بررسی می‌گردند. هر شکستن قانون = یک باگ.
+//
+//   node fuzz.js [iterations] [opsPerIter] [seed]
+//
+// خروجی هنگام شکست: seed و دنبالهٔ دقیق قدم‌ها، تا دقیقاً همان دوباره اجرا شود.
+const { chromium } = require('playwright');
+const path = require('path');
+const FILE = 'file://' + path.resolve(__dirname, 'test-index.html');
+
+const ITERS = parseInt(process.argv[2] || '150', 10);
+const OPS = parseInt(process.argv[3] || '25', 10);
+const SEED0 = parseInt(process.argv[4] || '1', 10);
+
+// ---- ژنراتور تصادفی با seed (mulberry32) — تا هر شکست دقیقاً تکرارشدنی باشد
+function rng(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// ---- کدی که داخل صفحه نصب می‌شود: اجرای یک دنباله + بررسی قوانین
+const HARNESS = function () {
+  const w = window;
+  const EPS = 0.02;
+
+  function near(a, b) { return Math.abs(a - b) < EPS; }
+  function bad(n) { return typeof n !== "number" || !isFinite(n); }
+
+  // ---------- قوانین دفتر ----------
+  // هرکدام باید در هر حالتی درست بماند. شکستنشان یعنی باگ.
+  w.__fzInvariants = function () {
+    const out = [];
+    const rep = w.__computeReport("all");
+
+    // ۱) رد پول باید دقیقاً به رقم صندوق برسد
+    const moves = w.__cashMovements();
+    const trail = moves.length ? moves[0].balance : 0;
+    const bal = w.__cashBalance();
+    if (!near(trail, bal)) out.push("رد پول (" + trail + ") با رقم صندوق (" + bal + ") جور نیست");
+
+    // ۲) صندوقِ گزارش == صندوق زنده
+    if (!near(rep.cashBox, bal)) out.push("صندوق گزارش (" + rep.cashBox + ") با صندوق زنده (" + bal + ") جور نیست");
+
+    // ۳) اجزای صندوق == رقم صندوق
+    const b = w.__cashBreakdown();
+    const sum = b.opening + b.sales + b.custPaid + b.manualIn + b.adjust
+              - b.purchasePaid - b.supPaid - b.expenses - b.manualOut;
+    if (!near(sum, bal)) out.push("جمع اجزای صندوق (" + sum + ") با رقم صندوق (" + bal + ") جور نیست");
+
+    // ۴) قرض هر مشتری == قرض قبلی + فروش قرضی − دریافت‌ها
+    w.customers.forEach(function (c) {
+      const cb = w.__custBreakdown(c);
+      const d = w.__custDebt(c);
+      if (!near(cb.opening + cb.sales - cb.paid, d))
+        out.push("قرض مشتری «" + c.name + "» با اجزایش جور نیست");
+      if (!near(cb.paidCash + cb.paidGoods, cb.paid))
+        out.push("اجزای دریافت مشتری «" + c.name + "» (نقد+جنس) با مجموع جور نیست");
+      if (bad(d)) out.push("قرض مشتری «" + c.name + "» عدد نیست: " + d);
+    });
+
+    // ۵) قرض هر تامین‌کننده == قرض قبلی + باقی فاکتورها − پرداخت‌ها
+    w.suppliers.forEach(function (s) {
+      const sb = w.__supBreakdown(s);
+      const d = w.__supDebt(s);
+      if (!near(sb.opening + sb.buys - sb.paid, d))
+        out.push("قرض تامین‌کننده «" + s.name + "» با اجزایش جور نیست");
+      if (bad(d)) out.push("قرض تامین‌کننده «" + s.name + "» عدد نیست: " + d);
+    });
+
+    // ۶) کانال‌ها: دوکان + بازار == مجموع
+    if (!near(rep.shopSales + rep.bazaarSales, rep.totalSales))
+      out.push("فروش دوکان+بازار با مجموع فروش جور نیست");
+    if (!near(rep.shopProfit + rep.bazaarProfit, rep.totalSales - rep.cogs))
+      out.push("فایدهٔ دوکان+بازار با (فروش − تمام‌شد) جور نیست");
+
+    // ۷) فرمول فایده
+    if (!near(rep.profit, rep.totalSales - rep.cogs - rep.wasteLoss - rep.cashShort))
+      out.push("فایدهٔ دوکان با فرمولش جور نیست");
+    if (!near(rep.netProfit, rep.profit - rep.expenses))
+      out.push("فایدهٔ نهایی با (فایده − مصارف) جور نیست");
+
+    // ۸) جمع فایدهٔ هر جنس == فروش − تمام‌شد
+    let pp = 0;
+    Object.keys(rep.perProduct).forEach(function (k) { pp += rep.perProduct[k].profit; });
+    if (!near(pp, rep.totalSales - rep.cogs))
+      out.push("جمع فایدهٔ اجناس (" + pp + ") با (فروش − تمام‌شد) (" + (rep.totalSales - rep.cogs) + ") جور نیست");
+
+    // ۹) هیچ رقمی نباید NaN شود
+    ["totalSales","cash","credit","cogs","wasteLoss","expenses","expensesGoods",
+     "profit","netProfit","cashIn","cashOut","cashBox","cashShort",
+     "shopSales","bazaarSales","shopProfit","bazaarProfit"].forEach(function (k) {
+      if (bad(rep[k])) out.push("رقم گزارش «" + k + "» عدد نیست: " + rep[k]);
+    });
+    if (bad(bal)) out.push("رقم صندوق عدد نیست: " + bal);
+    w.products.forEach(function (p) {
+      if (bad(p.qty)) out.push("موجودی «" + p.name + "» عدد نیست: " + p.qty);
+      if (bad(p.buy)) out.push("قیمت خرید «" + p.name + "» عدد نیست: " + p.buy);
+      if (bad(p.sell)) out.push("قیمت فروش «" + p.name + "» عدد نیست: " + p.sell);
+    });
+
+    // ۱۰) مصرف «به جنس» نباید در صندوق یا رد پول بیاید
+    let goodsExp = 0;
+    w.expenses.forEach(function (e) { if (w.__isGoodsExpense(e)) goodsExp += e.amount; });
+    if (!near(rep.expensesGoods, goodsExp)) out.push("جمع مصرف به جنس در گزارش جور نیست");
+    // مصارفِ صندوق باید دقیقاً «مصارف کل منهای مصارف جنسی» باشد
+    if (!near(b.expenses, rep.expenses - rep.expensesGoods))
+      out.push("مصارف صندوق (" + b.expenses + ") با (کل − جنسی) (" + (rep.expenses - rep.expensesGoods) + ") جور نیست");
+
+    return out;
+  };
+
+  // ۱۱) رفت‌وبرگشت سنک: هر رقم باید بعد از collect→apply همان بماند
+  w.__fzRoundTrip = function () {
+    const before = snapshot();
+    const blob = JSON.parse(JSON.stringify(w.__collectData()));
+    w.__applyData(blob);
+    const after = snapshot();
+    const out = [];
+    Object.keys(before).forEach(function (k) {
+      if (!near(before[k], after[k])) out.push("پس از سنک، «" + k + "» عوض شد: " + before[k] + " → " + after[k]);
+    });
+    return out;
+    function snapshot() {
+      const r = w.__computeReport("all");
+      return { cash: w.__cashBalance(), sales: r.totalSales, cogs: r.cogs,
+               profit: r.profit, net: r.netProfit, waste: r.wasteLoss,
+               custD: w.__custDebtTotal(), supD: w.__supDebtTotal(),
+               bazaar: r.bazaarSales, expG: r.expensesGoods,
+               qty: w.products.reduce(function (a, p) { return a + p.qty; }, 0) };
+    }
+  };
+
+  // ---------- بستن شیت‌های محافظ (تا دنباله بند نماند) ----------
+  function handleGuard(choice) {
+    const ov = document.getElementById("overlay");
+    if (!ov.classList.contains("open")) return null;
+    const sh = document.getElementById("sheet");
+    const pick = function (ids) {
+      for (let i = 0; i < ids.length; i++) {
+        const el = document.getElementById(ids[i]);
+        if (el) return el;
+      }
+      return null;
+    };
+    // محافظ موجودی / محافظ صندوق / اخطار نرخ / اخطار قیمت خرید
+    let el;
+    if (choice < 0.5) el = pick(["stAnyway", "lcCredit", "lcFund", "lcAnyway"]);
+    else el = pick(["stBack", "lcBack"]);
+    if (!el) el = pick(["stAnyway", "lcFund", "lcAnyway", "stBack", "lcBack"]);
+    if (el) { const id = el.id; el.click(); return id; }
+    // شیت‌های اطلاعی (بازبینی نرخ، اخطار قیمت خرید) — فقط بسته شوند
+    const close = sh.querySelector("[data-close]");
+    if (close) { close.click(); return "close"; }
+    ov.classList.remove("open");
+    return "force-close";
+  }
+  // فقط بسته می‌شود؛ محتویاتش پاک نمی‌گردد تا setTimeout های focus()
+  // روی عنصر نبود ارور ندهند (این نویزِ حلقه بود، نه باگ اپ).
+  w.__fzCloseSheet = function () {
+    document.getElementById("overlay").classList.remove("open");
+  };
+
+  // ---------- کارهای دوکان ----------
+  function setVal(id, v) {
+    const el = document.getElementById(id);
+    if (!el) return false;
+    el.value = String(v);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    return true;
+  }
+
+  w.__fzOps = {
+    // فروش نقد یا قرض
+    sale: function (a) {
+      const p = w.products[a.pi % w.products.length]; if (!p) return;
+      w.cart.length = 0;
+      w.__addToCart(p.id, a.qty);
+      w.__finishSale(a.credit ? "credit" : "cash", a.credit ? a.name : null);
+    },
+    // فاکتور خرید
+    purchase: function (a) {
+      const p = w.products[a.pi % w.products.length]; if (!p) return;
+      w.draft = { supplierName: a.sup, phone: "", date: a.date, paid: a.paid,
+        lines: [{ productId: p.id, name: p.name, unit: p.unit, qty: a.qty, buyPrice: a.price }] };
+      w.__savePurchase();
+    },
+    // برگشتی یک فروش تصادفی
+    returnSale: function (a) {
+      const ok = w.sales.filter(function (s) { return !s.returned && !s.returnOf; });
+      if (!ok.length) return;
+      w.__returnSale(ok[a.i % ok.length]);
+    },
+    // باطل‌کردن فاکتور
+    voidPurchase: function (a) {
+      const ok = w.purchases.filter(function (x) { return !w.__isVoided(x); });
+      if (!ok.length) return;
+      w.__voidPurchase(ok[a.i % ok.length]);
+      const y = document.getElementById("voidOk"); if (y) y.click();
+    },
+    // دریافت نقدی از مشتری
+    custPay: function (a) {
+      if (!w.customers.length) return;
+      const c = w.customers[a.i % w.customers.length];
+      w.__openCustomerPay(c);
+      setVal("cPayAmt", a.amt);
+      const ok = document.getElementById("cPayOk"); if (ok) ok.click();
+    },
+    // دریافت به جنس
+    goodsIn: function (a) {
+      if (!w.customers.length || !w.products.length) return;
+      const c = w.customers[a.i % w.customers.length];
+      const p = w.products[a.pi % w.products.length];
+      w.__openCustomerGoods(c);
+      const pick = document.getElementById("gPick"); if (!pick) return;
+      pick.click();
+      const row = document.querySelector('[data-gp="' + p.id + '"]'); if (!row) return;
+      row.click();
+      setVal("gQty", a.qty); setVal("gPrice", a.price);
+      const ok = document.getElementById("gOk"); if (ok) ok.click();
+    },
+    // پرداخت به تامین‌کننده
+    supPay: function (a) {
+      if (!w.suppliers.length) return;
+      const s = w.suppliers[a.i % w.suppliers.length];
+      w.__openPayDialog(s);
+      setVal("payAmt", a.amt);
+      const ok = document.getElementById("payOk"); if (ok) ok.click();
+    },
+    // مصرف نقدی
+    expense: function (a) {
+      w.__openExpenseForm();
+      setVal("expAmt", a.amt); setVal("expNote", "خرچ");
+      const ok = document.getElementById("expOk"); if (ok) ok.click();
+    },
+    // برداشتن جنس از گدام
+    goodsExp: function (a) {
+      if (!w.products.length) return;
+      const p = w.products[a.pi % w.products.length];
+      w.__openExpenseGoods();
+      const pick = document.getElementById("xPick"); if (!pick) return;
+      pick.click();
+      const row = document.querySelector('[data-xp="' + p.id + '"]'); if (!row) return;
+      row.click();
+      setVal("xQty", a.qty);
+      const ok = document.getElementById("xOk"); if (ok) ok.click();
+    },
+    // فروش بازار (نقد یا قرض)
+    bazaar: function (a) {
+      if (!w.products.length) return;
+      const p = w.products[a.pi % w.products.length];
+      w.__openBazaarSale();
+      const pick = document.getElementById("bPick"); if (!pick) return;
+      pick.click();
+      const row = document.querySelector('[data-bp="' + p.id + '"]'); if (!row) return;
+      row.click();
+      setVal("bQty", a.qty); setVal("bPrice", a.price);
+      if (a.credit) {
+        const cb = document.querySelector('#bPay [data-b="credit"]'); if (cb) cb.click();
+        setVal("bCust", a.name);
+      }
+      const ok = document.getElementById("bOk"); if (ok) ok.click();
+    },
+    // پول داخل / خارج صندوق
+    cashIn: function (a) {
+      w.__openCashEntry("in"); setVal("ceAmt", a.amt);
+      const ok = document.getElementById("ceOk"); if (ok) ok.click();
+    },
+    cashOut: function (a) {
+      w.__openCashEntry("out"); setVal("ceAmt", a.amt);
+      const ok = document.getElementById("ceOk"); if (ok) ok.click();
+    },
+    // ضایعات
+    waste: function (a) {
+      if (!w.products.length) return;
+      const p = w.products[a.pi % w.products.length];
+      w.waste.push({ id: w.__id(), date: new Date().toISOString(), productId: p.id,
+        productName: p.name, unit: p.unit, quantity: a.qty, buyPrice: p.buy || 0, reason: "damaged" });
+      p.qty = +(p.qty - a.qty).toFixed(3);
+      w.__save0("dukan.waste.v1", w.waste); w.__save0("dukan.products.v1", w.products);
+    },
+    voidWaste: function (a) {
+      const ok = w.waste.filter(function (x) { return !w.__isVoided(x); });
+      if (!ok.length) return;
+      w.__voidWaste(ok[a.i % ok.length]);
+      const y = document.getElementById("voidOk"); if (y) y.click();
+    },
+    voidGoodsExp: function (a) {
+      const ok = w.expenses.filter(function (x) { return w.__isGoodsExpense(x) && !w.__isVoided(x); });
+      if (!ok.length) return;
+      w.__voidGoodsExpense(ok[a.i % ok.length]);
+      const y = document.getElementById("voidOk"); if (y) y.click();
+    },
+    voidCustPay: function (a) {
+      const ok = w.custPayments.filter(function (x) { return !w.__isVoided(x); });
+      if (!ok.length) return;
+      w.__voidCustPayment(ok[a.i % ok.length]);
+      const y = document.getElementById("voidOk"); if (y) y.click();
+    },
+    voidSupPay: function (a) {
+      const ok = w.supPayments.filter(function (x) { return !w.__isVoided(x); });
+      if (!ok.length) return;
+      w.__voidSupPayment(ok[a.i % ok.length]);
+      const y = document.getElementById("voidOk"); if (y) y.click();
+    },
+    // شمارش ماهانه
+    count: function (a) {
+      document.querySelector('nav.tabs button[data-scr="more"]').click();
+      w.moreView = "count"; w.__renderMore();
+      w.products.forEach(function (p, i) {
+        setVal2('[data-cnt="' + p.id + '"]', Math.max(0, +(p.qty + ((i + a.i) % 3) - 1).toFixed(2)));
+      });
+      const btn = document.getElementById("saveCountBtn"); if (btn) btn.click();
+      function setVal2(sel, v) {
+        const el = document.querySelector(sel); if (!el) return;
+        el.value = String(v); el.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    },
+  };
+
+  // اجرای یک دنبالهٔ کامل و بررسی قوانین بعد از هر قدم
+  w.__fzRun = function (seq) {
+    // حالت اولیهٔ ثابت
+    ["products","sales","customers","suppliers","purchases","supPayments",
+     "custPayments","waste","expenses","stockCounts","cashEntries"]
+      .forEach(function (k) { w[k].length = 0; });
+    w.cart.length = 0;
+    w.moreView = null;
+    w.products.push({ id: "A", name: "برنج", type: "weighted", unit: "kg", buy: 80, sell: 100, qty: 100, expiry: "" });
+    w.products.push({ id: "B", name: "کیک", type: "unit", unit: "piece", buy: 8, sell: 10, qty: 200, expiry: "" });
+    w.products.push({ id: "C", name: "تخم مرغ", type: "unit", unit: "piece", buy: 5, sell: 15, qty: 0, expiry: "" });
+    w.cashEntries.push({ id: "op", date: "2020-01-01T00:00:00.000Z", kind: "opening", amount: 50000 });
+    w.__invalidateDebts();
+    w.__fzCloseSheet();
+
+    for (let i = 0; i < seq.length; i++) {
+      const step = seq[i];
+      try {
+        const fn = w.__fzOps[step.op];
+        if (fn) fn(step);
+      } catch (e) {
+        return { step: i, op: step.op, violations: ["ارور: " + (e && e.message)] };
+      }
+      // اگر شیت محافظی باز شد، تصمیمش گرفته شود
+      for (let g = 0; g < 3; g++) { if (handleGuard(step.guard) === null) break; }
+      w.__fzCloseSheet();
+
+      const v = w.__fzInvariants();
+      if (v.length) return { step: i, op: step.op, violations: v };
+    }
+    const rt = w.__fzRoundTrip();
+    if (rt.length) return { step: seq.length, op: "round-trip", violations: rt };
+    return null;
+  };
+};
+
+(async () => {
+  const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' });
+  const page = await browser.newPage({ viewport: { width: 412, height: 900 } });
+  const pageErrors = [];
+  // ارور focus() از تندعوض‌کردن شیت‌ها در خود حلقه می‌آید، نه از اپ
+  page.on('pageerror', e => { if (!/reading 'focus'/.test(e.message)) pageErrors.push(e.message); });
+  await page.goto(FILE);
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+  await page.evaluate(HARNESS);
+
+  const OPNAMES = ['sale','sale','sale','purchase','purchase','returnSale','voidPurchase',
+                   'custPay','goodsIn','supPay','expense','goodsExp','bazaar','bazaar',
+                   'cashIn','cashOut','waste','voidWaste','voidGoodsExp','voidCustPay',
+                   'voidSupPay','count'];
+  const NAMES = ['احمد','کریم','رحیم','متفرقه'];
+  const SUPS = ['تامین ۱','تامین ۲'];
+  const DATES = ['2026-07-10','2026-07-20','2026-07-20','2026-08-01'];
+
+  let failures = 0, firstFail = null;
+  const t0 = Date.now();
+
+  for (let it = 0; it < ITERS; it++) {
+    const seed = SEED0 + it;
+    const rnd = rng(seed);
+    const seq = [];
+    for (let k = 0; k < OPS; k++) {
+      seq.push({
+        op: OPNAMES[Math.floor(rnd() * OPNAMES.length)],
+        pi: Math.floor(rnd() * 3),
+        i: Math.floor(rnd() * 5),
+        qty: +(1 + rnd() * 30).toFixed(rnd() < 0.5 ? 0 : 2),
+        price: +(1 + rnd() * 120).toFixed(rnd() < 0.5 ? 0 : 2),
+        amt: +(1 + rnd() * 2000).toFixed(0),
+        paid: +(rnd() * 2500).toFixed(0),
+        credit: rnd() < 0.4,
+        name: NAMES[Math.floor(rnd() * NAMES.length)],
+        sup: SUPS[Math.floor(rnd() * SUPS.length)],
+        date: DATES[Math.floor(rnd() * DATES.length)],
+        guard: rnd(),
+      });
+    }
+    const res = await page.evaluate(s => window.__fzRun(s), seq);
+    if (res) {
+      failures++;
+      if (!firstFail) {
+        firstFail = { seed, res, seq: seq.slice(0, res.step + 1) };
+        console.log('\n❌ قانون شکست — seed ' + seed + '، قدم ' + res.step + ' («' + res.op + '»)');
+        res.violations.forEach(v => console.log('   • ' + v));
+      }
+    }
+  }
+
+  const secs = ((Date.now() - t0) / 1000).toFixed(1);
+  console.log('\n' + '='.repeat(52));
+  console.log('اجرا: ' + ITERS + ' دنباله × ' + OPS + ' قدم = ' + (ITERS * OPS) + ' کار، در ' + secs + ' ثانیه');
+  if (pageErrors.length) {
+    console.log('⚠️ ارورهای صفحه: ' + pageErrors.length);
+    [...new Set(pageErrors)].slice(0, 5).forEach(e => console.log('   • ' + e));
+  }
+  if (failures) {
+    console.log('❌ ' + failures + ' دنباله از ' + ITERS + ' قانون را شکستند');
+    require('fs').writeFileSync(path.join(__dirname,'fuzz-fail.json'), JSON.stringify(firstFail, null, 1));
+    console.log('   نمونهٔ اول در fuzz-fail.json ذخیره شد');
+  } else {
+    console.log('✅ هیچ قانونی نشکست — ' + ITERS + ' دنباله');
+  }
+  await browser.close();
+  process.exit(failures ? 1 : 0);
+})();

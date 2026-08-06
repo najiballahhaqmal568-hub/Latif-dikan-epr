@@ -696,7 +696,9 @@
   // ---------- Helpers ----------
   function id() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
   var nf = new Intl.NumberFormat("en-US", { maximumFractionDigits: 3 });
-  function money(n) { return nf.format(n) + " افغانی"; }
+  // n === 0 برای -0 هم درست است؛ +0 می‌کند تا «-0» نمایش داده نشود.
+  // گرد و غبار اعشار شناور (مثل -4.5e-13 پس از باطل‌کردن) هم صفر شود.
+  function money(n) { var v = (typeof n === "number" && Math.abs(n) < 0.005) ? 0 : n; return nf.format(v) + " افغانی"; }
   function unitLabel(u) { return u === "kg" ? "کیلو" : (u === "gb" ? "جی‌بی" : "دانه"); }
   function qtyUnit(n, u) { return nf.format(n) + " " + unitLabel(u); }
   function findP(pid) { for (var i = 0; i < products.length; i++) if (products[i].id === pid) return products[i]; return null; }
@@ -3253,6 +3255,9 @@
     });
     r.shopProfit = +r.shopProfit.toFixed(2); r.bazaarProfit = +r.bazaarProfit.toFixed(2);
     r.shopSales = +r.shopSales.toFixed(2); r.bazaarSales = +r.bazaarSales.toFixed(2);
+    // عمداً اینجا گرد نمی‌شود: اگر هر جزء جدا گرد شود، جمع اجزا با کل جور
+    // در نمی‌آید (فایدهٔ هر جنس با فایدهٔ کل ۲ پیسه فرق می‌کرد). گردکردن
+    // کار نمایش است و در money() انجام می‌شود.
     r.cashBox = +(r.cashIn - r.cashOut).toFixed(2);
     // کسری صندوق مثل کسری شمارش اجناس، از فایده کم می‌شود
     r.profit = +(r.profit - r.cashShort).toFixed(2);
@@ -3826,8 +3831,12 @@
       out.push({ date: p.date, amount: p.amount, label: "دریافت از " + (c ? c.name : "مشتری") });
     });
     purchases.forEach(function (p) {
-      if (!(p.paid > 0)) return;
-      out.push({ date: p.date, amount: -p.paid, label: "خرید نقد — " + (p.supplierName || "") });
+      // شرط باید «صفر نبودن» باشد، نه «بزرگ‌تر از صفر»: رکورد باطل‌کردن
+      // paid منفی دارد و با شرط قبلی از رد پول می‌افتاد — صندوق پول را پس
+      // می‌آورد ولی رد پول سطرش را نداشت و مانده‌اش جور نمی‌آمد.
+      if (!p.paid) return;
+      out.push({ date: p.date, amount: -p.paid,
+        label: (p.reverseOf ? "برگشت خرید نقد — " : "خرید نقد — ") + (p.supplierName || "") });
     });
     supPayments.forEach(function (p) {
       var s = findS(p.supplierId);
